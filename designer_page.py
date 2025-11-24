@@ -36,7 +36,7 @@ def render(inv_model, fwd_p50, fwd_p10, fwd_p90, section_lookup, df_full):
 
     # derived parameters
     s0 = s - h0
-    se = (L - (h0 * N0) + (s0 * (N0 - 1))) / 2
+    se = (L - ((h0 * N0) + (s0 * (N0 - 1)))) / 2
 
     st.sidebar.write(f"Computed s0 = {s0:.1f} mm")
     st.sidebar.write(f"Computed se = {se:.1f} mm")
