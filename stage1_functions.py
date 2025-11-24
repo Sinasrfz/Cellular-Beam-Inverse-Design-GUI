@@ -1,6 +1,6 @@
 # ============================================================
 # Stage 1 – Utility Functions for Inverse Design GUI
-# (Extracted directly from your scientific Stage-1 pipeline)
+# (Corrected scoring, stable ranking)
 # ============================================================
 
 import numpy as np
@@ -32,23 +32,42 @@ def compute_weight(H, bf, tw, tf, L, density=7850/1e9):
     return A * L * density
 
 # ------------------------------------------------------------
-# MULTI-OBJECTIVE SCORE
+# UPDATED MULTI-OBJECTIVE SCORE  (MUCH BETTER)
 # ------------------------------------------------------------
 
 def multiobjective_score(wu_target, wu_pred, weight, sci, en, aisc, failure_mode):
-    strength_penalty = abs(wu_pred - wu_target) / wu_target
-    code_penalty = (1 - sci) + (1 - en) + (1 - aisc)
+    """
+    LOWER SCORE = BETTER DESIGN.
+    Dominant: strength match.
+    Secondary: weight, failure mode.
+    Hard penalty: code failures.
+    """
 
-    # Failure mode penalty exactly as your Stage-1 logic
-    failure_penalty = 0
-    if failure_mode == "WPB":
-        failure_penalty = 3
-    elif failure_mode in ["WPS", "VBT"]:
-        failure_penalty = 1
+    # --- 1. Strength accuracy (dominant factor)
+    error_ratio = abs(wu_pred - wu_target) / wu_target
+    f_strength = error_ratio * 10  # strong weighting
 
-    return (
-        2.0 * strength_penalty +
-        1.5 * code_penalty +
-        0.5 * (weight / 200.0) +
-        1.5 * failure_penalty
-    )
+    # --- 2. Weight term
+    f_weight = weight / 1000       # scale to ~0.6–1.3
+
+    # --- 3. Code safety
+    penalty_code = 0
+    if sci == 0: penalty_code += 50
+    if en == 0:  penalty_code += 50
+    if aisc == 0: penalty_code += 50
+
+    # --- 4. Failure mode priority
+    failure_priority = {
+        "BGB": 0,
+        "WPL": 1,
+        "WPS": 2,
+        "LGB": 3,
+        "WPB": 4,
+        "Unknown": 5
+    }
+    f_failure = failure_priority.get(failure_mode, 5)
+
+    # FINAL SCORE
+    score = f_strength + f_weight + penalty_code + f_failure
+
+    return score
