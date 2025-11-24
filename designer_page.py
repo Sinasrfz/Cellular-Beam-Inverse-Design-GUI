@@ -1,4 +1,3 @@
-
 # ============================================================
 # designer_page.py — Core Inverse Design (3-Stage Pipeline)
 # ============================================================
@@ -124,19 +123,17 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
     # ============================================================
 
     if strict_results:
-    df_res = pd.DataFrame(strict_results)
-    st.success("✔ Found designs within ±2% accuracy.")
+        df_res = pd.DataFrame(strict_results).sort_values("Score")
+        st.success("✔ Found designs within ±2% accuracy.")
 
     elif relaxed_results:
-        df_res = pd.DataFrame(relaxed_results)
+        df_res = pd.DataFrame(relaxed_results).sort_values("Score")
         st.warning("⚠ No ±2% match. Showing ±10% feasible designs.")
-    
+
     else:
         df_res = pd.DataFrame(all_results)
-        st.error("⚠ No feasible match. Showing closest available design (score-based).")
-    
-    # 🔥 FORCE FINAL SORTING BY SCORE ONLY
-    df_res = df_res.sort_values("Score", ascending=True).reset_index(drop=True)
+        df_res = df_res.sort_values(["ErrorRatio", "Score"])
+        st.error("⚠ No feasible match. Showing closest available design.")
 
     # ============================================================
     # Strength Match Indicator
@@ -212,4 +209,3 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         df_res.to_csv(index=False),
         file_name="inverse_design_results.csv"
     )
-
