@@ -8,12 +8,18 @@ import pandas as pd
 import requests
 import io
 
-# Streamlit Layout
-st.set_page_config(page_title="Cellular Beam Inverse Design Tool", layout="wide")
+# ------------------------------------------------------------
+# STREAMLIT PAGE CONFIGURATION
+# ------------------------------------------------------------
+st.set_page_config(
+    page_title="Cellular Beam Inverse Design Tool",
+    layout="wide"
+)
 st.title("🧠 Cellular Beam Inverse Design Tool")
 
+
 # ============================================================
-# GITHUB RELEASES DOWNLOAD URL FOR INVERSE MODEL
+# 1 — INVERSE MODEL (GitHub Releases URL)
 # ============================================================
 
 INVERSE_MODEL_URL = (
@@ -22,29 +28,30 @@ INVERSE_MODEL_URL = (
 )
 
 def load_joblib_from_url(url):
-    """Download .joblib file from GitHub Releases or other direct link."""
+    """Download .joblib file from GitHub Releases."""
     try:
         response = requests.get(url)
         response.raise_for_status()
-        file_obj = io.BytesIO(response.content)
-        return joblib.load(file_obj)
+        return joblib.load(io.BytesIO(response.content))
     except Exception as e:
-        st.error("❌ Failed to load model from URL.")
+        st.error("❌ Failed to load inverse model.")
         st.code(str(e))
         raise e
 
+
 # ============================================================
-# LOCAL FILE PATHS (GitHub-hosted)
+# 2 — LOCAL FILE PATHS (stored in GitHub repo root)
 # ============================================================
 
 FWD_P50        = "forward_p50.joblib"
 FWD_P10        = "forward_p10.joblib"
 FWD_P90        = "forward_p90.joblib"
 SECTION_LOOKUP = "section_lookup.csv"
-DATA_FILE      = "21.xlsx"   # full dataset
+DATA_FILE      = "21.xlsx"
+
 
 # ============================================================
-# CACHE LOADERS
+# 3 — CACHE LOADERS
 # ============================================================
 
 @st.cache_resource
@@ -61,29 +68,58 @@ def load_forward():
 
 @st.cache_resource
 def load_lookup():
-    return pd.read_csv(SECTION_LOOKUP)
+    df = pd.read_csv(SECTION_LOOKUP)
+
+    # Normalize column names
+    df.columns = (
+        df.columns
+        .str.replace(" ", "")
+        .str.replace(",", "")
+        .str.replace("×", "x")
+        .str.strip()
+    )
+    return df
 
 @st.cache_resource
 def load_full_data():
-    return pd.read_excel(DATA_FILE)
+    df = pd.read_excel(DATA_FILE)
+
+    # Normalize column names
+    df.columns = (
+        df.columns
+        .str.replace(" ", "")
+        .str.replace(",", "")
+        .str.replace("×", "x")    # handle fy×Area
+        .str.strip()
+    )
+    return df
+
 
 # ============================================================
-# INITIAL LOAD
+# 4 — INITIAL LOAD
 # ============================================================
 
 try:
-    inv_model = load_inverse()    # Load the heavy inverse model from GitHub Releases
+    inv_model = load_inverse()
     fwd_p50, fwd_p10, fwd_p90 = load_forward()
     section_lookup = load_lookup()
     df_full = load_full_data()
+
+    # Quick validation
+    if "SectionID" not in df_full.columns:
+        st.error("❌ ERROR: Your dataset does NOT contain SectionID.")
+        st.stop()
+
     st.success("✔ All models and data loaded successfully.")
+
 except Exception as e:
     st.error("❌ Failed to load required assets.")
     st.code(str(e))
     st.stop()
 
+
 # ============================================================
-# SIDEBAR NAVIGATION
+# 5 — SIDEBAR NAVIGATION
 # ============================================================
 
 st.sidebar.header("📌 Navigation")
@@ -97,16 +133,15 @@ page = st.sidebar.radio(
     ]
 )
 
+
 # ============================================================
-# PAGE ROUTING
+# 6 — PAGE ROUTING
 # ============================================================
 
 if page == "🏗 Designer Tool":
     import designer_page
-    designer_page.render(
-        inv_model, fwd_p50, fwd_p10, fwd_p90,
-        section_lookup, df_full
-    )
+    designer_page.render(inv_model, fwd_p50, fwd_p10, fwd_p90,
+                         section_lookup, df_full)
 
 elif page == "📊 Diagnostics":
     import diagnostics_page
