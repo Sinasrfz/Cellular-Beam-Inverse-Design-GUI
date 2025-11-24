@@ -23,6 +23,23 @@ from stage1_functions import (
 
 def render(inv_model, fwd_p50, fwd_p10, fwd_p90, section_lookup, df_full):
 
+    # Normalize both dataframes (VERY IMPORTANT)
+    section_lookup.columns = (
+        section_lookup.columns
+        .str.replace(" ", "")
+        .str.replace(",", "")
+        .str.replace("×", "x")
+        .str.strip()
+    )
+
+    df_full.columns = (
+        df_full.columns
+        .str.replace(" ", "")
+        .str.replace(",", "")
+        .str.replace("×", "x")
+        .str.strip()
+    )
+
     st.header("🏗 Designer Tool — 3-Stage Inverse Design")
 
     # --------------------- INPUTS ------------------------
@@ -65,33 +82,52 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
 
     for sec in top_sections:
 
-        row = section_lookup[section_lookup.SectionID == sec].iloc[0]
+        # ----------------------------
+        # SECTION LOOKUP
+        # ----------------------------
+        row_df = section_lookup[section_lookup["SectionID"] == sec]
+
+        if row_df.empty:
+            st.warning(f"⚠ SectionID {sec} not found in lookup table.")
+            continue
+
+        row = row_df.iloc[0]
 
         # Ensure correct numeric types
-        H = int(row.H)
-        bf = int(row.bf)
-        tw = float(row.tw)
-        tf = float(row.tf)
+        H  = float(row["H"])
+        bf = float(row["bf"])
+        tw = float(row["tw"])
+        tf = float(row["tf"])
 
-        # Forward predictions
+        # ----------------------------
+        # FORWARD SURROGATES
+        # ----------------------------
         X = np.array([[H, bf, tw, tf, L, h0, s, s0, se, fy]])
-        wu50 = fwd_p50.predict(X)[0]
-        wu10 = fwd_p10.predict(X)[0]
-        wu90 = fwd_p90.predict(X)[0]
+        wu50 = float(fwd_p50.predict(X)[0])
+        wu10 = float(fwd_p10.predict(X)[0])
+        wu90 = float(fwd_p90.predict(X)[0])
 
-        # Code checks
-        SCI = check_SCI(H, bf, tw, tf, h0, s0, se)
-        ENM = check_ENM(H, bf, tw, tf, h0, s0)
+        # ----------------------------
+        # CODE CHECKS
+        # ----------------------------
+        SCI  = check_SCI(H, bf, tw, tf, h0, s0, se)
+        ENM  = check_ENM(H, bf, tw, tf, h0, s0)
         AISC = check_AISC(H, bf, tw, tf, h0, s)
 
-        # Failure mode
-        fm_series = df_full[df_full.SectionID == sec]["Failure_mode"]
-        fm = fm_series.mode()[0] if not fm_series.mode().empty else "Unknown"
+        # ----------------------------
+        # FAILURE MODE LOOKUP
+        # ----------------------------
+        fm_df = df_full[df_full["SectionID"] == sec]["Failure_mode"]
+        fm = fm_df.mode()[0] if not fm_df.mode().empty else "Unknown"
 
-        # Weight
+        # ----------------------------
+        # WEIGHT
+        # ----------------------------
         weight = compute_weight(H, bf, tw, tf, L)
 
-        # Score
+        # ----------------------------
+        # SCORE
+        # ----------------------------
         score = multiobjective_score(
             wu_target, wu50, weight,
             SCI, ENM, AISC, fm
