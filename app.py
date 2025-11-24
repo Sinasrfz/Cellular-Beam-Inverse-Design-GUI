@@ -13,40 +13,25 @@ st.set_page_config(page_title="Cellular Beam Inverse Design Tool", layout="wide"
 st.title("🧠 Cellular Beam Inverse Design Tool")
 
 # ============================================================
-# GOOGLE DRIVE DIRECT DOWNLOAD URL FOR INVERSE MODEL
+# GITHUB RELEASES DOWNLOAD URL FOR INVERSE MODEL
 # ============================================================
 
 INVERSE_MODEL_URL = (
-    "https://drive.google.com/uc?export=download&id=1_ETS6bVRiKq8YuwWRLOMwEREYcxblM6k"
+    "https://github.com/Sinasrfz/Cellular-Beam-Inverse-Design-GUI/"
+    "releases/download/v1.0/inverse_model_catboost.joblib"
 )
 
-# ============================================================
-# GOOGLE DRIVE DOWNLOADER (supports large files)
-# ============================================================
-
-def load_joblib_from_drive(url):
-    """Download .joblib file (large-file safe) from Google Drive."""
+def load_joblib_from_url(url):
+    """Download .joblib file from GitHub Releases or other direct link."""
     try:
-        session = requests.Session()
-        response = session.get(url, stream=True)
-
-        # If Drive shows virus scan page → extract confirm token
-        if "confirm=" not in response.url:
-            for key, value in response.cookies.items():
-                if key.startswith("download_warning"):
-                    confirm_token = value
-                    url = url + "&confirm=" + confirm_token
-                    response = session.get(url, stream=True)
-                    break
-
+        response = requests.get(url)
+        response.raise_for_status()
         file_obj = io.BytesIO(response.content)
         return joblib.load(file_obj)
-
     except Exception as e:
-        st.error("❌ Failed to load model from Google Drive.")
+        st.error("❌ Failed to load model from URL.")
         st.code(str(e))
         raise e
-
 
 # ============================================================
 # LOCAL FILE PATHS (GitHub-hosted)
@@ -64,7 +49,7 @@ DATA_FILE      = "21.xlsx"   # full dataset
 
 @st.cache_resource
 def load_inverse():
-    return load_joblib_from_drive(INVERSE_MODEL_URL)
+    return load_joblib_from_url(INVERSE_MODEL_URL)
 
 @st.cache_resource
 def load_forward():
@@ -87,8 +72,8 @@ def load_full_data():
 # ============================================================
 
 try:
-    inv_model = load_inverse()   # Load heavy model from Google Drive
-    fwd_p50, fwd_p10, fwd_p90 = load_forward()  # Load from GitHub
+    inv_model = load_inverse()    # Load the heavy inverse model from GitHub Releases
+    fwd_p50, fwd_p10, fwd_p90 = load_forward()
     section_lookup = load_lookup()
     df_full = load_full_data()
     st.success("✔ All models and data loaded successfully.")
