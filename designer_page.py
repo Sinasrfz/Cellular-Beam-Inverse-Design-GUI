@@ -12,7 +12,7 @@ from stage1_functions import (
     check_ENM,
     check_AISC,
     compute_weight,
-    multiobjective_score
+    multiobjective_score   # now uses improved version
 )
 
 plt.rcParams["font.family"] = "Times New Roman"
@@ -34,7 +34,7 @@ def render(inv_model, fwd_p50, fwd_p10, fwd_p90, section_lookup, df_full):
     fy = st.sidebar.number_input("Steel fy (MPa)", 200.0, 600.0, 355.0)
     N0 = st.sidebar.number_input("Number of openings N0", 1, 50, 10)
 
-    # derived parameters
+    # derived geometry
     s0 = s - h0
     se = (L - ((h0 * N0) + (s0 * (N0 - 1)))) / 2
 
@@ -59,8 +59,9 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
 
     st.subheader("🔍 Phase 1 — Inverse Model Prediction")
 
+    # Top 10 predicted sections
     proba = inv_model.predict_proba([[wu_target, L, h0, s, fy]])[0]
-    top_sections = proba.argsort()[-10:][::-1]  # take more candidates
+    top_sections = proba.argsort()[-10:][::-1]
 
     strict_results = []
     relaxed_results = []
@@ -74,6 +75,7 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         tw = float(row.tw)
         tf = float(row.tf)
 
+        # Forward surrogate prediction
         X = np.array([[H, bf, tw, tf, L, h0, s, s0, se, fy]])
         wu50 = fwd_p50.predict(X)[0]
         wu10 = fwd_p10.predict(X)[0]
@@ -86,11 +88,14 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         ENM = check_ENM(H, bf, tw, tf, h0, s0)
         AISC = check_AISC(H, bf, tw, tf, h0, s)
 
+        # Failure mode
         fm_series = df_full[df_full.SectionID == sec]["Failure_mode"]
         fm = fm_series.mode()[0] if not fm_series.mode().empty else "Unknown"
 
+        # Weight
         weight = compute_weight(H, bf, tw, tf, L)
 
+        # SCORE (new stable scoring)
         score = multiobjective_score(
             wu_target, wu50, weight, SCI, ENM, AISC, fm
         )
@@ -114,24 +119,22 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         all_results.append(row_entry)
 
     # ============================================================
-    # OUTPUT PRIORITY SYSTEM
+    # PROPER OUTPUT PRIORITY
     # ============================================================
 
     if strict_results:
-        df_res = pd.DataFrame(strict_results)
-        df_res = df_res.sort_values("Score", ascending=True)
+        df_res = pd.DataFrame(strict_results).sort_values("Score")
         st.success("✔ Found designs within ±2% accuracy.")
-    
+
     elif relaxed_results:
-        df_res = pd.DataFrame(relaxed_results)
-        df_res = df_res.sort_values("Score", ascending=True)
+        df_res = pd.DataFrame(relaxed_results).sort_values("Score")
         st.warning("⚠ No ±2% match. Showing ±10% feasible designs.")
-    
+
     else:
         df_res = pd.DataFrame(all_results)
-        # fallback: sort by closeness to Wu_target THEN score
-        df_res = df_res.sort_values(["ErrorRatio", "Score"], ascending=[True, True])
+        df_res = df_res.sort_values(["ErrorRatio", "Score"])
         st.error("⚠ No feasible match. Showing closest available design.")
+
     # ============================================================
     # Strength Match Indicator
     # ============================================================
@@ -206,4 +209,3 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         df_res.to_csv(index=False),
         file_name="inverse_design_results.csv"
     )
-
