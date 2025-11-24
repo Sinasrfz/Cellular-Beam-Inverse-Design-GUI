@@ -1,3 +1,4 @@
+
 # ============================================================
 # designer_page.py — Core Inverse Design (3-Stage Pipeline)
 # ============================================================
@@ -12,10 +13,10 @@ from stage1_functions import (
     check_ENM,
     check_AISC,
     compute_weight,
-    multiobjective_score
+    multiobjective_score   # now uses improved version
 )
 
-plt.rcParams["font.family"] = "Times New Roman"]
+plt.rcParams["font.family"] = "Times New Roman"
 plt.rcParams["font.size"] = 20
 
 # ============================================================
@@ -34,7 +35,7 @@ def render(inv_model, fwd_p50, fwd_p10, fwd_p90, section_lookup, df_full):
     fy = st.sidebar.number_input("Steel fy (MPa)", 200.0, 600.0, 355.0)
     N0 = st.sidebar.number_input("Number of openings N0", 1, 50, 10)
 
-    # Derived geometry
+    # derived geometry
     s0 = s - h0
     se = (L - ((h0 * N0) + (s0 * (N0 - 1)))) / 2
 
@@ -95,7 +96,7 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         # Weight
         weight = compute_weight(H, bf, tw, tf, L)
 
-        # Score
+        # SCORE (new stable scoring)
         score = multiobjective_score(
             wu_target, wu50, weight, SCI, ENM, AISC, fm
         )
@@ -111,7 +112,7 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
             "Score": score
         }
 
-        # Feasibility levels
+        # --- 3-Level Feasibility ---
         if error_ratio <= 0.02:
             strict_results.append(row_entry)
         if error_ratio <= 0.10:
@@ -123,19 +124,17 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
     # ============================================================
 
     if strict_results:
-        df_res = pd.DataFrame(strict_results)
+        df_res = pd.DataFrame(strict_results).sort_values("Score")
         st.success("✔ Found designs within ±2% accuracy.")
 
     elif relaxed_results:
-        df_res = pd.DataFrame(relaxed_results)
+        df_res = pd.DataFrame(relaxed_results).sort_values("Score")
         st.warning("⚠ No ±2% match. Showing ±10% feasible designs.")
 
     else:
         df_res = pd.DataFrame(all_results)
+        df_res = df_res.sort_values(["ErrorRatio", "Score"])
         st.error("⚠ No feasible match. Showing closest available design.")
-
-    # 🔥 FINAL MANDATORY SORT — ALWAYS BY SCORE
-    df_res = df_res.sort_values("Score", ascending=True).reset_index(drop=True)
 
     # ============================================================
     # Strength Match Indicator
@@ -181,13 +180,17 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
     tw = best["tw"]
     tf = best["tf"]
 
+    # Top flange
     ax.add_patch(plt.Rectangle((-bf/2, H/2 - tf), bf, tf, color="gray"))
+    # Bottom flange
     ax.add_patch(plt.Rectangle((-bf/2, -H/2), bf, tf, color="gray"))
+    # Web
     ax.add_patch(plt.Rectangle((-tw/2, -H/2), tw, H, color="lightgray"))
 
     ax.set_xlim(-bf, bf)
     ax.set_ylim(-H/1.2, H/1.2)
     ax.set_aspect("equal")
+
     ax.set_title(f"Section: H={H} mm, bf={bf} mm, tw={tw} mm, tf={tf} mm")
     ax.axis("off")
     st.pyplot(fig)
