@@ -6,9 +6,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-# ==========================================
-# IMPORT YOUR STAGE-1 FUNCTIONS
-# ==========================================
 from stage1_functions import (
     check_SCI,
     check_ENM,
@@ -23,26 +20,8 @@ from stage1_functions import (
 
 def render(inv_model, fwd_p50, fwd_p10, fwd_p90, section_lookup, df_full):
 
-    # Normalize both dataframes (VERY IMPORTANT)
-    section_lookup.columns = (
-        section_lookup.columns
-        .str.replace(" ", "")
-        .str.replace(",", "")
-        .str.replace("×", "x")
-        .str.strip()
-    )
-
-    df_full.columns = (
-        df_full.columns
-        .str.replace(" ", "")
-        .str.replace(",", "")
-        .str.replace("×", "x")
-        .str.strip()
-    )
-
     st.header("🏗 Designer Tool — 3-Stage Inverse Design")
 
-    # --------------------- INPUTS ------------------------
     st.sidebar.subheader("🧮 Design Inputs")
     wu_target = st.sidebar.number_input("Target wu (kN/m)", 5.0, 300.0, 30.0)
     L = st.sidebar.number_input("Beam span L (mm)", 5000.0, 30000.0, 12000.0)
@@ -51,7 +30,7 @@ def render(inv_model, fwd_p50, fwd_p10, fwd_p90, section_lookup, df_full):
     fy = st.sidebar.number_input("Steel fy (MPa)", 200.0, 600.0, 355.0)
     N0 = st.sidebar.number_input("Number of openings N0", 1, 50, 10)
 
-    # ------------------- Compute derived -------------------
+    # derived
     s0 = s - h0
     se = (L - (h0 * N0) + (s0 * (N0 - 1))) / 2
 
@@ -59,9 +38,11 @@ def render(inv_model, fwd_p50, fwd_p10, fwd_p90, section_lookup, df_full):
     st.sidebar.write(f"Computed se = {se:.1f} mm")
 
     if st.button("Run Inverse Design", type="primary"):
-        run_inverse(wu_target, L, h0, s, s0, se, fy,
-                    inv_model, fwd_p50, fwd_p10, fwd_p90,
-                    section_lookup, df_full)
+        run_inverse(
+            wu_target, L, h0, s, s0, se, fy,
+            inv_model, fwd_p50, fwd_p10, fwd_p90,
+            section_lookup, df_full
+        )
 
 
 # ============================================================
@@ -74,63 +55,46 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
 
     st.subheader("🔍 Phase 1 — Inverse Model Prediction (Top Sections)")
 
-    # Predict top-5 SectionIDs
     proba = inv_model.predict_proba([[wu_target, L, h0, s, fy]])[0]
-    top_sections = proba.argsort()[-5:][::-1]
+    top_sections = proba.argsort()[-10:][::-1]   # choose more candidates
 
     results = []
 
     for sec in top_sections:
 
-        # ----------------------------
-        # SECTION LOOKUP
-        # ----------------------------
-        row_df = section_lookup[section_lookup["SectionID"] == sec]
+        row = section_lookup[section_lookup.SectionID == sec].iloc[0]
+        H = int(row.H)
+        bf = int(row.bf)
+        tw = float(row.tw)
+        tf = float(row.tf)
 
-        if row_df.empty:
-            st.warning(f"⚠ SectionID {sec} not found in lookup table.")
+        X = np.array([[H, bf, tw, tf, L, h0, s, s0, se, fy]])
+        wu50 = fwd_p50.predict(X)[0]
+        wu10 = fwd_p10.predict(X)[0]
+        wu90 = fwd_p90.predict(X)[0]
+
+        # ======================================================
+        #  NEW: FEASIBILITY REQUIREMENT  ±2% TOLERANCE
+        # ======================================================
+        if abs(wu50 - wu_target) / wu_target > 0.02:
+            # reject design
             continue
 
-        row = row_df.iloc[0]
-
-        # Ensure correct numeric types
-        H  = float(row["H"])
-        bf = float(row["bf"])
-        tw = float(row["tw"])
-        tf = float(row["tf"])
-
-        # ----------------------------
-        # FORWARD SURROGATES
-        # ----------------------------
-        X = np.array([[H, bf, tw, tf, L, h0, s, s0, se, fy]])
-        wu50 = float(fwd_p50.predict(X)[0])
-        wu10 = float(fwd_p10.predict(X)[0])
-        wu90 = float(fwd_p90.predict(X)[0])
-
-        # ----------------------------
-        # CODE CHECKS
-        # ----------------------------
-        SCI  = check_SCI(H, bf, tw, tf, h0, s0, se)
-        ENM  = check_ENM(H, bf, tw, tf, h0, s0)
+        # code checks
+        SCI = check_SCI(H, bf, tw, tf, h0, s0, se)
+        ENM = check_ENM(H, bf, tw, tf, h0, s0)
         AISC = check_AISC(H, bf, tw, tf, h0, s)
 
-        # ----------------------------
-        # FAILURE MODE LOOKUP
-        # ----------------------------
-        fm_df = df_full[df_full["SectionID"] == sec]["Failure_mode"]
-        fm = fm_df.mode()[0] if not fm_df.mode().empty else "Unknown"
+        # failure mode
+        fm_series = df_full[df_full.SectionID == sec]["Failure_mode"]
+        fm = fm_series.mode()[0] if not fm_series.mode().empty else "Unknown"
 
-        # ----------------------------
-        # WEIGHT
-        # ----------------------------
+        # weight
         weight = compute_weight(H, bf, tw, tf, L)
 
-        # ----------------------------
-        # SCORE
-        # ----------------------------
+        # score
         score = multiobjective_score(
-            wu_target, wu50, weight,
-            SCI, ENM, AISC, fm
+            wu_target, wu50, weight, SCI, ENM, AISC, fm
         )
 
         results.append({
@@ -143,9 +107,16 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
             "Score": score
         })
 
+    # ============================================================
+    # If no section is feasible → show message
+    # ============================================================
+    if len(results) == 0:
+        st.error("❌ No feasible section satisfies the ±2% load requirement.")
+        return
+
     df_res = pd.DataFrame(results).sort_values("Score", ascending=True)
 
-    st.subheader("🏅 Recommended Section")
+    st.subheader("🏅 Recommended Section (Strength-feasible)")
     st.write(df_res.head(1))
 
     st.subheader("📊 Full Ranking Table")
