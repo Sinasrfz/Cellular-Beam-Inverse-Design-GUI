@@ -5,6 +5,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 
 from stage1_functions import (
     check_SCI,
@@ -13,6 +14,9 @@ from stage1_functions import (
     compute_weight,
     multiobjective_score
 )
+
+plt.rcParams["font.family"] = "Times New Roman"
+plt.rcParams["font.size"] = 20
 
 # ============================================================
 # MAIN RENDER FUNCTION
@@ -30,7 +34,7 @@ def render(inv_model, fwd_p50, fwd_p10, fwd_p90, section_lookup, df_full):
     fy = st.sidebar.number_input("Steel fy (MPa)", 200.0, 600.0, 355.0)
     N0 = st.sidebar.number_input("Number of openings N0", 1, 50, 10)
 
-    # derived
+    # derived parameters
     s0 = s - h0
     se = (L - (h0 * N0) + (s0 * (N0 - 1))) / 2
 
@@ -53,12 +57,14 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
                 inv_model, fwd_p50, fwd_p10, fwd_p90,
                 section_lookup, df_full):
 
-    st.subheader("🔍 Phase 1 — Inverse Model Prediction (Top Sections)")
+    st.subheader("🔍 Phase 1 — Inverse Model Prediction")
 
     proba = inv_model.predict_proba([[wu_target, L, h0, s, fy]])[0]
-    top_sections = proba.argsort()[-10:][::-1]   # choose more candidates
+    top_sections = proba.argsort()[-10:][::-1]  # take more candidates
 
-    results = []
+    strict_results = []
+    relaxed_results = []
+    all_results = []
 
     for sec in top_sections:
 
@@ -73,50 +79,118 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         wu10 = fwd_p10.predict(X)[0]
         wu90 = fwd_p90.predict(X)[0]
 
-        # ======================================================
-        #  NEW: FEASIBILITY REQUIREMENT  ±2% TOLERANCE
-        # ======================================================
-        if abs(wu50 - wu_target) / wu_target > 0.02:
-            # reject design
-            continue
+        error_ratio = abs(wu50 - wu_target) / wu_target
 
-        # code checks
+        # Code checks
         SCI = check_SCI(H, bf, tw, tf, h0, s0, se)
         ENM = check_ENM(H, bf, tw, tf, h0, s0)
         AISC = check_AISC(H, bf, tw, tf, h0, s)
 
-        # failure mode
         fm_series = df_full[df_full.SectionID == sec]["Failure_mode"]
         fm = fm_series.mode()[0] if not fm_series.mode().empty else "Unknown"
 
-        # weight
         weight = compute_weight(H, bf, tw, tf, L)
 
-        # score
         score = multiobjective_score(
             wu_target, wu50, weight, SCI, ENM, AISC, fm
         )
 
-        results.append({
+        row_entry = {
             "SectionID": sec,
             "H": H, "bf": bf, "tw": tw, "tf": tf,
             "Wu_pred": wu50, "Wu_10": wu10, "Wu_90": wu90,
+            "ErrorRatio": error_ratio,
             "SCI": SCI, "ENM": ENM, "AISC": AISC,
             "FailureMode": fm,
             "Weight_kg": weight,
             "Score": score
-        })
+        }
+
+        # --- 3-Level Feasibility ---
+        if error_ratio <= 0.02:
+            strict_results.append(row_entry)
+        if error_ratio <= 0.10:
+            relaxed_results.append(row_entry)
+        all_results.append(row_entry)
 
     # ============================================================
-    # If no section is feasible → show message
+    # OUTPUT PRIORITY SYSTEM
     # ============================================================
-    if len(results) == 0:
-        st.error("❌ No feasible section satisfies the ±2% load requirement.")
-        return
 
-    df_res = pd.DataFrame(results).sort_values("Score", ascending=True)
+    if strict_results:
+        df_res = pd.DataFrame(strict_results).sort_values("Score")
+        st.success("✔ Found designs within **±2% strength accuracy**.")
+    elif relaxed_results:
+        df_res = pd.DataFrame(relaxed_results).sort_values("Score")
+        st.warning("⚠ No ±2% match. Showing **±10% feasible** designs.")
+    else:
+        df_res = pd.DataFrame(all_results).sort_values("ErrorRatio")
+        st.error("⚠ No feasible match. Showing **closest available** design.")
 
-    st.subheader("🏅 Recommended Section (Strength-feasible)")
+    # ============================================================
+    # Strength Match Indicator
+    # ============================================================
+
+    st.subheader("📏 Strength Match Indicator")
+
+    best = df_res.iloc[0]
+    diff = best["Wu_pred"] - wu_target
+    diff_percent = 100 * diff / wu_target
+
+    if abs(diff) <= 0.02 * wu_target:
+        st.success(f"✔ Strength perfectly matched ({diff_percent:+.2f}%).")
+    elif abs(diff) <= 0.10 * wu_target:
+        st.warning(f"⚠ Strength moderately matched ({diff_percent:+.2f}%).")
+    else:
+        st.error(f"❌ Strength mismatch ({diff_percent:+.2f}%).")
+
+    # ============================================================
+    # Code Check Color Indicators
+    # ============================================================
+
+    def check_color(val):
+        return "🟩 PASS" if val == 1 else "🟥 FAIL"
+
+    st.markdown("### 📘 Code Check Summary")
+    st.write({
+        "SCI": check_color(best["SCI"]),
+        "ENM": check_color(best["ENM"]),
+        "AISC": check_color(best["AISC"])
+    })
+
+    # ============================================================
+    # Geometry Plot
+    # ============================================================
+
+    st.markdown("### 📐 Recommended Geometry")
+
+    fig, ax = plt.subplots(figsize=(6, 4))
+
+    H = best["H"]
+    bf = best["bf"]
+    tw = best["tw"]
+    tf = best["tf"]
+
+    # Top flange
+    ax.add_patch(plt.Rectangle((-bf/2, H/2 - tf), bf, tf, color="gray"))
+    # Bottom flange
+    ax.add_patch(plt.Rectangle((-bf/2, -H/2), bf, tf, color="gray"))
+    # Web
+    ax.add_patch(plt.Rectangle((-tw/2, -H/2), tw, H, color="lightgray"))
+
+    ax.set_xlim(-bf, bf)
+    ax.set_ylim(-H/1.2, H/1.2)
+    ax.set_aspect("equal")
+
+    ax.set_title(f"Section: H={H} mm, bf={bf} mm, tw={tw} mm, tf={tf} mm")
+    ax.axis("off")
+    st.pyplot(fig)
+
+    # ============================================================
+    # Final Tables
+    # ============================================================
+
+    st.subheader("🏅 Recommended Section")
     st.write(df_res.head(1))
 
     st.subheader("📊 Full Ranking Table")
