@@ -1,10 +1,8 @@
 streamlit
 pandas
 numpy
-joblib
-scipy
-matplotlib
-lightgbm
-xgboost
-pymoo
 scikit-learn
+joblib
+requests
+openpyxl
+catboost
