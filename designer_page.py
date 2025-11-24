@@ -12,11 +12,12 @@ from stage1_functions import (
     check_ENM,
     check_AISC,
     compute_weight,
-    multiobjective_score   # now uses improved version
+    multiobjective_score
 )
 
 plt.rcParams["font.family"] = "Times New Roman"
 plt.rcParams["font.size"] = 20
+
 
 # ============================================================
 # MAIN RENDER FUNCTION
@@ -36,7 +37,7 @@ def render(inv_model, fwd_p50, fwd_p10, fwd_p90, section_lookup, df_full):
 
     # derived geometry
     s0 = s - h0
-    se = (L - ((h0 * N0) + (s0 * (N0 - 1)))) / 2
+    se = (L - (h0 * N0 + s0 * (N0 - 1))) / 2
 
     st.sidebar.write(f"Computed s0 = {s0:.1f} mm")
     st.sidebar.write(f"Computed se = {se:.1f} mm")
@@ -67,6 +68,9 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
     relaxed_results = []
     all_results = []
 
+    # --------------------------------------------------------
+    # Evaluate each candidate
+    # --------------------------------------------------------
     for sec in top_sections:
 
         row = section_lookup[section_lookup.SectionID == sec].iloc[0]
@@ -95,7 +99,7 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         # Weight
         weight = compute_weight(H, bf, tw, tf, L)
 
-        # SCORE (new stable scoring)
+        # Score
         score = multiobjective_score(
             wu_target, wu50, weight, SCI, ENM, AISC, fm
         )
@@ -105,35 +109,40 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
             "H": H, "bf": bf, "tw": tw, "tf": tf,
             "Wu_pred": wu50, "Wu_10": wu10, "Wu_90": wu90,
             "ErrorRatio": error_ratio,
-            "SCI": SCI, "ENM": ENM, "AISC": AISC,
+            "SCI": SCI,
+            "ENM": ENM,
+            "AISC": AISC,
             "FailureMode": fm,
             "Weight_kg": weight,
             "Score": score
         }
 
-        # --- 3-Level Feasibility ---
+        # Feasibility classifications
         if error_ratio <= 0.02:
             strict_results.append(row_entry)
         if error_ratio <= 0.10:
             relaxed_results.append(row_entry)
+
         all_results.append(row_entry)
 
     # ============================================================
-    # PROPER OUTPUT PRIORITY
+    # PRIORITY OUTPUT SYSTEM (SORTED BY SCORE)
     # ============================================================
 
     if strict_results:
-        df_res = pd.DataFrame(strict_results).sort_values("Score")
+        df_res = pd.DataFrame(strict_results)
         st.success("✔ Found designs within ±2% accuracy.")
 
     elif relaxed_results:
-        df_res = pd.DataFrame(relaxed_results).sort_values("Score")
-        st.warning("⚠ No ±2% match. Showing ±10% feasible designs.")
+        df_res = pd.DataFrame(relaxed_results)
+        st.warning("⚠ Showing ±10% feasible designs.")
 
     else:
         df_res = pd.DataFrame(all_results)
-        df_res = df_res.sort_values(["ErrorRatio", "Score"])
-        st.error("⚠ No feasible match. Showing closest available design.")
+        st.error("⚠ No match in ±10%. Showing closest available design.")
+
+    # 🔥 REAL FIX: FORCE FINAL SORT ONLY BY SCORE
+    df_res = df_res.sort_values("Score", ascending=True).reset_index(drop=True)
 
     # ============================================================
     # Strength Match Indicator
@@ -148,7 +157,7 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
     if abs(diff) <= 0.02 * wu_target:
         st.success(f"✔ Strength perfectly matched ({diff_percent:+.2f}%).")
     elif abs(diff) <= 0.10 * wu_target:
-        st.warning(f"⚠ Strength moderately matched ({diff_percent:+.2f}%).")
+        st.warning(f"⚠ Moderately matched ({diff_percent:+.2f}%).")
     else:
         st.error(f"❌ Strength mismatch ({diff_percent:+.2f}%).")
 
@@ -179,19 +188,16 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
     tw = best["tw"]
     tf = best["tf"]
 
-    # Top flange
     ax.add_patch(plt.Rectangle((-bf/2, H/2 - tf), bf, tf, color="gray"))
-    # Bottom flange
     ax.add_patch(plt.Rectangle((-bf/2, -H/2), bf, tf, color="gray"))
-    # Web
     ax.add_patch(plt.Rectangle((-tw/2, -H/2), tw, H, color="lightgray"))
 
     ax.set_xlim(-bf, bf)
     ax.set_ylim(-H/1.2, H/1.2)
     ax.set_aspect("equal")
-
     ax.set_title(f"Section: H={H} mm, bf={bf} mm, tw={tw} mm, tf={tf} mm")
     ax.axis("off")
+
     st.pyplot(fig)
 
     # ============================================================
