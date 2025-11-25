@@ -157,11 +157,11 @@ def render():
     wu_u = st.number_input("Target wu (kN/m)", 5.0, 300.0, 40.0)
 
     # Dataset ranges (convert to float)
-    rL  = (float(df_full["L"].min()),  float(df_full["L"].max()))
-    r0  = (float(df_full["h0"].min()), float(df_full["h0"].max()))
-    rs  = (float(df_full["s"].min()),  float(df_full["s"].max()))
-    rfy = (float(df_full["fy"].min()), float(df_full["fy"].max()))
-    rwu = (float(df_full["wu_FEA"].min()), float(df_full["wu_FEA"].max()))
+    rL  = (float(df_full["L"].min()),        float(df_full["L"].max()))
+    r0  = (float(df_full["h0"].min()),       float(df_full["h0"].max()))
+    rs  = (float(df_full["s"].min()),        float(df_full["s"].max()))
+    rfy = (float(df_full["fy"].min()),       float(df_full["fy"].max()))
+    rwu = (float(df_full["wu_FEA"].min()),   float(df_full["wu_FEA"].max()))
 
     # Margin for yellow zone (±10%)
     def margin(r):
@@ -169,6 +169,7 @@ def render():
         span = high - low
         return (low - 0.10*span, high + 0.10*span)
 
+    # Classification rule
     def classify(v, r):
         low, high = r
         mlow, mhigh = margin(r)
@@ -179,16 +180,19 @@ def render():
             return "🟨 Caution"
         else:
             return "🟥 Outside"
+
+    # Format helper (3 decimals)
     def f(x):
         return f"{x:.3f}"
-    # Classification
+
     st.markdown("### Validity Status")
 
-    st.write(f"L  → {classify(L_u, rL)}  (dataset: {rL})")
-    st.write(f"h0 → {classify(h0_u, r0)}  (dataset: {r0})")
-    st.write(f"s  → {classify(s_u, rs)}  (dataset: {rs})")
-    st.write(f"fy → {classify(fy_u, rfy)} (dataset: {rfy})")
-    st.write(f"wu → {classify(wu_u, rwu)} (dataset: {rwu})")
+    # Display with units
+    st.write(f"L  → {classify(L_u, rL)}  (dataset: {f(rL[0])}–{f(rL[1])} mm)")
+    st.write(f"h0 → {classify(h0_u, r0)}  (dataset: {f(r0[0])}–{f(r0[1])} mm)")
+    st.write(f"s  → {classify(s_u, rs)}   (dataset: {f(rs[0])}–{f(rs[1])} mm)")
+    st.write(f"fy → {classify(fy_u, rfy)} (dataset: {f(rfy[0])}–{f(rfy[1])} MPa)")
+    st.write(f"wu → {classify(wu_u, rwu)} (dataset: {f(rwu[0])}–{f(rwu[1])} kN/m)")
 
     # Global message
     statuses = [
@@ -219,6 +223,7 @@ def render():
     • Mean NN distance = {np.mean(dvals):.3f}  
     • 95% NN distance = {np.percentile(dvals,95):.3f}  
     """)
+
 
 
 
