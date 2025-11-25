@@ -1,6 +1,7 @@
 # ============================================================
-# designer_page.py — Updated with Quantile-Crossing Warning +
-# Removed Code Summary Block + GitHub Image + PSO Enabled
+# designer_page.py — FINAL VERSION
+# Quantile Crossing (single message), N0 Check, GitHub Image,
+# No Code Summary Block, Fully Compatible with Main App
 # ============================================================
 
 import streamlit as st
@@ -21,7 +22,7 @@ plt.rcParams["font.size"] = 20
 
 
 # ============================================================
-# 📌 MAIN RENDER FUNCTION
+# MAIN RENDER FUNCTION
 # ============================================================
 
 def render(inv_model, fwd_p50, fwd_p10, fwd_p90, section_lookup, df_full):
@@ -44,18 +45,18 @@ def render(inv_model, fwd_p50, fwd_p10, fwd_p90, section_lookup, df_full):
     st.sidebar.write(f"Computed se = {se:.1f} mm")
 
     # ============================================================
-    # ❗ Immediate feasibility check (must be BEFORE button)
+    # ❗ Immediate feasibility check (BEFORE button!)
     # ============================================================
     if se < 0:
         st.error(
             "❌ The computed end spacing *se* is negative.\n\n"
-            "This means the chosen number of openings **N0** is not feasible.\n"
-            "➡ Reduce **N0** or increase the spacing **s**."
+            "This means the selected number of openings **N0** is not feasible.\n"
+            "➡ Reduce **N0** or increase spacing **s**."
         )
         return
 
     # ============================================================
-    # Show Image from GitHub Repository
+    # Insert Figure from GitHub Repository
     # ============================================================
     st.image(
         "https://raw.githubusercontent.com/Sinasrfz/Cellular-Beam-Inverse-Design-GUI/main/Picture1.jpg",
@@ -89,10 +90,14 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
     top_sections = proba.argsort()[-10:][::-1]
 
     results = []
-    crossing_detected = False   # <--- detect quantile crossing
 
     # ============================================================
-    # Loop Through Candidates
+    # Detect quantile crossing (global flag)
+    # ============================================================
+    crossing_detected = False
+
+    # ============================================================
+    # Loop through all candidate sections
     # ============================================================
     for sec in top_sections:
 
@@ -102,26 +107,26 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         tw = float(row.tw)
         tf = float(row.tf)
 
-        # Forward surrogate
+        # Forward surrogate predictions
         X = np.array([[H, bf, tw, tf, L, h0, s, s0, se, fy]])
         wu50 = fwd_p50.predict(X)[0]
         wu10 = fwd_p10.predict(X)[0]
         wu90 = fwd_p90.predict(X)[0]
 
-        # ❗ Quantile crossing detection (NO message here)
+        # ❗ Do NOT show message here — only set flag
         if wu90 < wu50:
             crossing_detected = True
 
         error_ratio = abs(wu50 - wu_target) / wu_target
 
         # --------------------------------------------------------
-        # Code checks with Emoji conversion
+        # Code checks → Emoji conversion
         # --------------------------------------------------------
         SCI = check_SCI(H, bf, tw, tf, h0, s0, se)
         ENM = check_ENM(H, bf, tw, tf, h0, s0)
         AISC = check_AISC(H, bf, tw, tf, h0, s)
 
-        def make_emoji(val):
+        def to_emoji(val):
             if val == -1:
                 return "⚪ N/A"
             elif val == 1:
@@ -129,9 +134,9 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
             else:
                 return "🟥 FAIL"
 
-        SCI_emoji = make_emoji(SCI)
-        ENM_emoji = make_emoji(ENM)
-        AISC_emoji = make_emoji(AISC)
+        SCI_e = to_emoji(SCI)
+        ENM_e = to_emoji(ENM)
+        AISC_e = to_emoji(AISC)
 
         # Failure mode
         fm_series = df_full[df_full.SectionID == sec]["Failure_mode"]
@@ -139,7 +144,6 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
 
         weight = compute_weight(H, bf, tw, tf, L)
 
-        # Score
         score = multiobjective_score(
             wu_target, wu50, weight, SCI, ENM, AISC, fm
         )
@@ -147,41 +151,41 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         results.append({
             "SectionID": sec,
             "H": H, "bf": bf, "tw": tw, "tf": tf,
-            "Wu_50": wu50,
             "Wu_10": wu10,
+            "Wu_50": wu50,
             "Wu_90": wu90,
             "ErrorRatio": error_ratio,
-            "SCI": SCI_emoji,
-            "ENM": ENM_emoji,
-            "AISC": AISC_emoji,
+            "SCI": SCI_e,
+            "ENM": ENM_e,
+            "AISC": AISC_e,
             "FailureMode": fm,
             "Weight_kg": weight,
             "Score": score
         })
 
-    # DataFrame
+    # Build DataFrame
     df_res = pd.DataFrame(results)
     df_res = df_res.sort_values("Score", ascending=True).reset_index(drop=True)
 
     # ============================================================
-    # Show quantile-crossing warning ONLY if detected
+    # Show quantile-crossing info (ONLY ONCE)
     # ============================================================
     if crossing_detected:
         st.info(
-            "🔍 *Note on prediction bounds:* For some candidate sections, the "
-            "p90 prediction was slightly lower than p50. This is normal in "
-            "quantile regression (quantile crossing) and does **not** affect "
-            "the validity of the design."
+            "🔍 *Note on prediction bounds:* For some candidate sections, "
+            "the p90 prediction is slightly smaller than p50. This is normal "
+            "in quantile regression (*quantile crossing*) and does **not** "
+            "affect the validity of the design."
         )
 
     # ============================================================
-    # Strength Match Indicator
+    # Strength match indicator
     # ============================================================
     st.subheader("📏 Strength Match Indicator")
 
     best = df_res.iloc[0]
     diff = best["Wu_50"] - wu_target
-    diff_percent = 100 * diff / wu_target
+    diff_percent = diff / wu_target * 100
 
     if abs(diff) <= 0.02 * wu_target:
         st.success(f"✔ Strength perfectly matched ({diff_percent:+.2f}%).")
@@ -191,7 +195,7 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         st.error(f"❌ Strength mismatch ({diff_percent:+.2f}%).")
 
     # ============================================================
-    # 📌 Results Table (Code Summary Removed)
+    # Results Display
     # ============================================================
     st.subheader("🏅 Recommended Section")
     st.write(df_res.head(1))
