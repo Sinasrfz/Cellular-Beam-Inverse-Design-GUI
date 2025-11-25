@@ -26,7 +26,7 @@ plt.rcParams["font.size"] = 20
 
 def render(inv_model, fwd_p50, fwd_p10, fwd_p90, section_lookup, df_full):
 
-    st.header("🏗 Designer Tool — 3-Stage Inverse Design")
+    st.header("🏗 Designer Tool")
 
     st.sidebar.subheader("🧮 Design Inputs")
     wu_target = st.sidebar.number_input("Target wu (kN/m)", 5.0, 300.0, 30.0)
@@ -223,7 +223,7 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
 
     # One-time quantile warning
     if quantile_cross_issue:
-        st.info("ℹ️ In some cases, the upper bound (p90) is lower than the median. "
+        st.info("ℹ️ In some cases, the upper bound is lower than the predicted value. "
                 "This is normal in quantile regression.")
 
     # Exact strength-matching section
@@ -244,3 +244,4 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         df_res.to_csv(index=False),
         file_name="inverse_design_results.csv"
     )
+
