@@ -67,7 +67,7 @@ def render():
     st.write("Comparing surrogate predictions vs. FEA values from dataset.")
 
     # Build test X and y
-    X = df_full[["H","bf","tw","tf","L","ho","s","so","se","fy"]].values
+    X = df_full[["H","bf","tw","tf","L","h0","s","s0","se","fy"]].values
     y = df_full["wu,FEA (kN/m)"].values
 
     pred50 = fwd_p50.predict(X)
@@ -210,4 +210,5 @@ def render():
     dataset's domain. Distances help identify extrapolation regions 
     where predictions may be less reliable.
     """)
+
 
