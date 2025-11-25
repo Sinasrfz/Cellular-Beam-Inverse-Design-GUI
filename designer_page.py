@@ -1,5 +1,5 @@
 # ============================================================
-# designer_page.py — Hybrid PSO + Code Applicability + Unique Solutions
+# designer_page.py — Hybrid PSO + Code Applicability + Emoji Table Output
 # ============================================================
 
 import streamlit as st
@@ -37,7 +37,7 @@ def render(inv_model, fwd_p50, fwd_p10, fwd_p90, section_lookup, df_full):
 
     # derived geometry
     s0 = s - h0
-    se = (L - (h0 * N0 + s0 * (N0 - 1))) / 2
+    se = (L - (h0 * N0 + s0 * (N0 - 1))) ) / 2
 
     st.sidebar.write(f"Computed s0 = {s0:.1f} mm")
     st.sidebar.write(f"Computed se = {se:.1f} mm")
@@ -60,7 +60,7 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
 
     st.subheader("🔍 Phase 1 — Inverse Model Prediction")
 
-    # Top 10 candidates from inverse model
+    # top 10 sections
     proba = inv_model.predict_proba([[wu_target, L, h0, s, fy]])[0]
     top_sections = proba.argsort()[-10:][::-1]
 
@@ -78,7 +78,7 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         return int(np.argmin([abs(v - target) for v in values]))
 
     # ============================================================
-    # PER-SECTION OPTIMIZATION + CODE APPLICABILITY FIX
+    # PROCESS EACH SECTION
     # ============================================================
 
     for sec in top_sections:
@@ -89,16 +89,12 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         tw_base = float(row.tw)
         tf_base = float(row.tf)
 
-        # applicability flags
         row_full = df_full[df_full.SectionID == sec].iloc[0]
         SCI_app  = int(row_full["SCI_applicable"])
         ENM_app  = int(row_full["ENM_applicable"])
         AISC_app = int(row_full["AISC_applicable"])
 
-        # -------------------------------------------------------
-        # PSO neighborhood (±1 catalog step)
-        # -------------------------------------------------------
-
+        # neighborhood
         H_idx0  = nearest_index(H_values,  H_base)
         bf_idx0 = nearest_index(bf_values, bf_base)
         tw_idx0 = nearest_index(tw_values, tw_base)
@@ -109,13 +105,13 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
             hi = min(idx + 1, len(values)-1)
             return list(range(lo, hi+1))
 
-        H_idx_list  = local_range(H_values,  H_idx0)
+        H_idx_list  = local_range(H_values, H_idx0)
         bf_idx_list = local_range(bf_values, bf_idx0)
         tw_idx_list = local_range(tw_values, tw_idx0)
         tf_idx_list = local_range(tf_values, tf_idx0)
 
         # ======================================================
-        # DISCRETE PSO INITIALIZATION
+        # PSO (Discrete + Random Init)
         # ======================================================
 
         num_particles = 12
@@ -138,7 +134,6 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
                 rand(tf_idx_list)
             ]
 
-        # fitness
         def fitness(idx_vec):
             hi  = int(np.clip(round(idx_vec[0]), 0, len(H_values)-1))
             bfi = int(np.clip(round(idx_vec[1]), 0, len(bf_values)-1))
@@ -150,23 +145,22 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
             twc = tw_values[twi]
             tfc = tf_values[tfi]
 
-            Xp  = np.array([[Hc, bfc, twc, tfc, L, h0, s, s0, se, fy]])
+            Xp = np.array([[Hc, bfc, twc, tfc, L, h0, s, s0, se, fy]])
             wu = fwd_p50.predict(Xp)[0]
             return abs(wu - wu_target)
 
         pbest = pos.copy()
         pbest_fit = np.array([fitness(p) for p in pos])
-
         gbest = pbest[np.argmin(pbest_fit)]
         gbest_fit = np.min(pbest_fit)
 
-        # PSO LOOP
+        # PSO loop
         for _ in range(num_iters):
             for i in range(num_particles):
                 vel[i] = (
                     w * vel[i]
-                    + c1 * np.random.rand() * (pbest[i] - pos[i])
-                    + c2 * np.random.rand() * (gbest    - pos[i])
+                    + c1*np.random.rand()*(pbest[i] - pos[i])
+                    + c2*np.random.rand()*(gbest    - pos[i])
                 )
                 pos[i] += vel[i]
 
@@ -180,7 +174,7 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
                         gbest = pos[i].copy()
                         gbest_fit = fit
 
-        # final PSO discrete geometry
+        # final discrete geometry
         final_hi  = int(np.clip(round(gbest[0]), 0, len(H_values)-1))
         final_bfi = int(np.clip(round(gbest[1]), 0, len(bf_values)-1))
         final_twi = int(np.clip(round(gbest[2]), 0, len(tw_values)-1))
@@ -191,9 +185,7 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         tw = tw_values[final_twi]
         tf = tf_values[final_tfi]
 
-        # ------------------------------------------------------
-        # FORWARD MODEL ON OPTIMIZED GEOMETRY
-        # ------------------------------------------------------
+        # forward surrogate
         X = np.array([[H, bf, tw, tf, L, h0, s, s0, se, fy]])
         wu50 = fwd_p50.predict(X)[0]
         wu10 = fwd_p10.predict(X)[0]
@@ -201,27 +193,13 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
 
         error_ratio = abs(wu50 - wu_target) / wu_target
 
-        # ------------------------------------------------------
-        # CODE CHECKS WITH APPLICABILITY FIX
-        # ------------------------------------------------------
+        # ======================================================
+        # APPLICABILITY-AWARE CODE CHECKS
+        # ======================================================
 
-        # SCI
-        if SCI_app == 0:
-            SCI = -1   # Not applicable
-        else:
-            SCI = check_SCI(H, bf, tw, tf, h0, s0, se)
-
-        # ENM
-        if ENM_app == 0:
-            ENM = -1
-        else:
-            ENM = check_ENM(H, bf, tw, tf, h0, s0)
-
-        # AISC
-        if AISC_app == 0:
-            AISC = -1
-        else:
-            AISC = check_AISC(H, bf, tw, tf, h0, s)
+        SCI = -1 if SCI_app == 0 else check_SCI(H, bf, tw, tf, h0, s0, se)
+        ENM = -1 if ENM_app == 0 else check_ENM(H, bf, tw, tf, h0, s0)
+        AISC = -1 if AISC_app == 0 else check_AISC(H, bf, tw, tf, h0, s)
 
         # failure mode
         fm_series = df_full[df_full.SectionID == sec]["Failure_mode"]
@@ -230,10 +208,7 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         # weight
         weight = compute_weight(H, bf, tw, tf, L)
 
-        # =======================================================
-        # SCORE WITH N/A FIX (NO PENALTY FOR -1)
-        # =======================================================
-
+        # score
         score = multiobjective_score(
             wu_target, wu50, weight,
             (1 if SCI == 1 else 0 if SCI == 0 else -1),
@@ -247,9 +222,7 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
             "H": H, "bf": bf, "tw": tw, "tf": tf,
             "Wu_pred": wu50, "Wu_10": wu10, "Wu_90": wu90,
             "ErrorRatio": error_ratio,
-            "SCI": SCI,
-            "ENM": ENM,
-            "AISC": AISC,
+            "SCI": SCI, "ENM": ENM, "AISC": AISC,
             "FailureMode": fm,
             "Weight_kg": weight,
             "Score": score
@@ -263,20 +236,20 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         all_results.append(row_entry)
 
     # ============================================================
-    # BUILD FINAL DF
+    # FINAL DF
     # ============================================================
 
     if strict_results:
         df_res = pd.DataFrame(strict_results)
-        st.success("✔ Found designs within ±2% accuracy.")
+        st.success("✔ Designs found within ±2%.")
     elif relaxed_results:
         df_res = pd.DataFrame(relaxed_results)
-        st.warning("⚠ Showing ±10% feasible designs.")
+        st.warning("⚠ Using ±10% designs.")
     else:
         df_res = pd.DataFrame(all_results)
-        st.error("⚠ No match within ±10%. Showing closest designs.")
+        st.error("⚠ No match in ±10%. Showing closest designs.")
 
-    # ---- REMOVE DUPLICATES (unique geometry only)
+    # unique geometries only
     df_res = df_res.drop_duplicates(subset=["H","bf","tw","tf"]).reset_index(drop=True)
 
     df_res = df_res.sort_values("Score", ascending=True).reset_index(drop=True)
@@ -289,20 +262,20 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
 
     best = df_res.iloc[0]
     diff = best["Wu_pred"] - wu_target
-    diff_percent = 100 * diff / wu_target
+    diff_percent = diff / wu_target * 100
 
-    if abs(diff) <= 0.02 * wu_target:
-        st.success(f"✔ Strength perfectly matched ({diff_percent:+.2f}%).")
-    elif abs(diff) <= 0.10 * wu_target:
-        st.warning(f"⚠ Moderately matched ({diff_percent:+.2f}%).")
+    if abs(diff_percent) <= 2:
+        st.success(f"✔ Perfect match ({diff_percent:+.2f}%).")
+    elif abs(diff_percent) <= 10:
+        st.warning(f"⚠ Moderate match ({diff_percent:+.2f}%).")
     else:
-        st.error(f"❌ Strength mismatch ({diff_percent:+.2f}%).")
+        st.error(f"❌ Weak match ({diff_percent:+.2f}%).")
 
     # ============================================================
-    # CODE CHECK SUMMARY WITH N/A SUPPORT
+    # CODE CHECK SUMMARY
     # ============================================================
 
-    def display_code(val):
+    def emoji_code(val):
         if val == -1:
             return "⚪ N/A"
         elif val == 1:
@@ -312,9 +285,9 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
 
     st.markdown("### 📘 Code Check Summary")
     st.write({
-        "SCI":  display_code(best["SCI"]),
-        "ENM":  display_code(best["ENM"]),
-        "AISC": display_code(best["AISC"]),
+        "SCI":  emoji_code(best["SCI"]),
+        "ENM":  emoji_code(best["ENM"]),
+        "AISC": emoji_code(best["AISC"]),
     })
 
     # ============================================================
@@ -337,23 +310,27 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
     ax.set_xlim(-bf, bf)
     ax.set_ylim(-H/1.2, H/1.2)
     ax.set_aspect("equal")
-    ax.set_title(f"Section: H={H} mm, bf={bf} mm, tw={tw} mm, tf={tf} mm")
     ax.axis("off")
 
     st.pyplot(fig)
 
     # ============================================================
-    # FINAL TABLES
+    # EMOJI TABLE OUTPUT
     # ============================================================
 
+    df_res_display = df_res.copy()
+    df_res_display["SCI"]  = df_res_display["SCI"].apply(emoji_code)
+    df_res_display["ENM"]  = df_res_display["ENM"].apply(emoji_code)
+    df_res_display["AISC"] = df_res_display["AISC"].apply(emoji_code)
+
     st.subheader("🏅 Recommended Section")
-    st.write(df_res.head(1))
+    st.write(df_res_display.head(1))
 
     st.subheader("📊 Full Ranking Table")
-    st.dataframe(df_res)
+    st.dataframe(df_res_display)
 
     st.download_button(
         "Download Results as CSV",
-        df_res.to_csv(index=False),
+        df_res_display.to_csv(index=False),
         file_name="inverse_design_results.csv"
     )
