@@ -68,7 +68,8 @@ def render():
 
     # Build test X and y
     X = df_full[["H","bf","tw","tf","L","h0","s","s0","se","fy"]].values
-    y = df_full["wu,FEA (kN/m)"].values
+    y = df_full["wu_FEA"].values
+
 
     pred50 = fwd_p50.predict(X)
     pred10 = fwd_p10.predict(X)
@@ -210,5 +211,6 @@ def render():
     dataset's domain. Distances help identify extrapolation regions 
     where predictions may be less reliable.
     """)
+
 
 
