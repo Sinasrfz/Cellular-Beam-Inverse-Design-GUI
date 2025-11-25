@@ -1,5 +1,5 @@
 # ============================================================
-# designer_page.py — 3-Stage Inverse Design (Final Updated Version)
+# designer_page.py — 3-Stage Inverse Design (Updated Version)
 # ============================================================
 
 import streamlit as st
@@ -43,7 +43,7 @@ def render(inv_model, fwd_p50, fwd_p10, fwd_p90, section_lookup, df_full):
     st.sidebar.write(f"Computed s0 = {s0:.1f} mm")
     st.sidebar.write(f"Computed se = {se:.1f} mm")
 
-    # Basic geometrical feasibility
+    # Geometric feasibility
     if se < 0:
         st.error("❌ Selected N0 is NOT feasible for this span. Reduce N0.")
         return
@@ -66,50 +66,46 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
 
     st.subheader("🔍 Phase 1 — Inverse Model Prediction")
 
-    # ============================================================
-    # 🔧 ADVANCED FEASIBILITY CHECK (ALL SECTIONS)
-    # ============================================================
-
-    wu_min = 1e9
-    wu_max = -1e9
-
+    # Compute full forward space for feasibility
+    all_wu_p50 = []
     for _, row in section_lookup.iterrows():
-        H = int(row.H)
-        bf = int(row.bf)
-        tw = float(row.tw)
-        tf = float(row.tf)
-
+        H = row.H; bf = row.bf; tw = row.tw; tf = row.tf
         Xtest = np.array([[H, bf, tw, tf, L, h0, s, s0, se, fy]])
+        val = fwd_p50.predict(Xtest)[0]
+        all_wu_p50.append(val)
 
-        LB = fwd_p10.predict(Xtest)[0]
-        UB = fwd_p90.predict(Xtest)[0]
+    wu_min = min(all_wu_p50)
+    wu_max = max(all_wu_p50)
 
-        wu_min = min(wu_min, LB)
-        wu_max = max(wu_max, UB)
-
-    # Check feasibility
+    # Check physical feasibility
     if wu_target < wu_min or wu_target > wu_max:
 
-        st.error("❌ The requested target strength is NOT physically achievable "
-                 "with this geometry and material configuration.")
+        st.error("❌ The requested target strength is NOT physically achievable with this geometry and material configuration.")
 
-        st.markdown(f"""
-        ### 📉 Feasibility Summary
-        - **Target wu:** {wu_target:.2f} kN/m  
-        - **Minimum achievable wu:** {wu_min:.2f} kN/m  
-        - **Maximum achievable wu:** {wu_max:.2f} kN/m  
-        """)
+        st.markdown("### 📉 Feasibility Summary")
+        st.write(f"**Target wu:** {wu_target:.2f} kN/m")
+        st.write(f"**Minimum achievable wu:** {wu_min:.2f} kN/m")
+        st.write(f"**Maximum achievable wu:** {wu_max:.2f} kN/m")
 
-        st.markdown("### 🛠 Why is this design infeasible?")
-
-        if wu_target < wu_min:
-            st.write("- The beam is **too strong** to reach such a low strength.")
+        # Engineering guidance for outside range
         if wu_target > wu_max:
-            st.write("- The beam is **too weak** to reach such a high strength.")
+            st.markdown("### 🔧 Why is this design infeasible?")
+            st.write("The beam is **too weak** to reach such a high wu.")
 
-        st.markdown("### 🔧 Engineering Recommendations")
+            st.markdown("### 🔧 Engineering Recommendations")
+            st.write("""
+            To **increase** strength, consider:
+            - Decrease hole diameter **h0**
+            - Reduce number of openings **N0**
+            - Increase plate thickness (tf, tw)
+            - Increase steel grade **fy**
+            - Reduce span **L**
+            """)
+        else:
+            st.markdown("### 🔧 Why is this design infeasible?")
+            st.write("The beam is **too strong** for such a small target wu.")
 
-        if wu_target < wu_min:
+            st.markdown("### 🔧 Engineering Recommendations")
             st.write("""
             To **reduce** strength:
             - Increase hole diameter **h0**
@@ -118,25 +114,9 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
             - Reduce steel grade **fy**
             - Increase span **L**
             """)
-
-        if wu_target > wu_max:
-            st.write("""
-            To **increase** strength:
-            - Decrease hole diameter **h0**
-            - Reduce number of openings **N0**
-            - Increase plate thickness (tf, tw)
-            - Increase steel grade fy
-            - Reduce span **L**
-            """)
-
-        st.info("The design must be adjusted before inverse design can continue.")
         return
 
-
-    # ============================================================
-    # 🔍 INVERSE MODEL — TOP 10 CANDIDATES
-    # ============================================================
-
+    # PHASE 1: Inverse model prediction
     proba = inv_model.predict_proba([[wu_target, L, h0, s, fy]])[0]
     top_sections = proba.argsort()[-10:][::-1]
 
@@ -152,7 +132,6 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         tf = float(row.tf)
 
         Xtest = np.array([[H, bf, tw, tf, L, h0, s, s0, se, fy]])
-
         Pred_wu = fwd_p50.predict(Xtest)[0]
         LB_wu = fwd_p10.predict(Xtest)[0]
         UB_wu = fwd_p90.predict(Xtest)[0]
@@ -162,12 +141,14 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
 
         error_ratio = abs(Pred_wu - wu_target) / wu_target
 
+        # Applicability from dataset
         app = df_full[df_full.SectionID == sec].iloc[0]
         SCI_app = app["SCI_applicable"]
         ENM_app = app["ENM_applicable"]
         AISC_app = app["AISC_applicable"]
 
         SCI = ENM = AISC = -1
+
         if SCI_app == 1:
             SCI = check_SCI(H, bf, tw, tf, h0, s0, se)
         if ENM_app == 1:
@@ -202,58 +183,59 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
             "AbsErr": abs(Pred_wu - wu_target)
         })
 
+    df_res = pd.DataFrame(results).sort_values("Score").reset_index(drop=True)
 
-    # ============================================================
-    # 🔥 NEW PHASE: ACHIEVABILITY CHECK (OPTION A)
-    # ============================================================
+    # Phase 1.5 — Achievability inside feasible range but no good match
+    best_wu = df_res.iloc[0]["Predicted_wu"]
+    err = abs(best_wu - wu_target)
 
-    df_res = pd.DataFrame(results).sort_values("AbsErr").reset_index(drop=True)
-
-    # tolerance rule
     tolerance = max(0.15 * wu_target, 5)
 
-    if df_res.iloc[0]["AbsErr"] > tolerance:
+    if err > tolerance:
+        st.error("❗ No available section can reach your target strength for the selected geometry.")
 
-        best_wu = df_res.iloc[0]["Predicted_wu"]
+        st.markdown("### 📉 Achievability Check")
+        st.write(f"**Target wu:** {wu_target:.2f} kN/m")
+        st.write(f"**Closest achievable wu:** {best_wu:.2f} kN/m")
+        st.write(f"**Difference:** {err:.2f} kN/m")
 
-        st.warning("⚠ **No available section in the database can achieve the target strength.**")
+        if best_wu < wu_target:
+            st.markdown("### 🔧 Engineering Guidance — Increase Strength")
+            st.write("""
+            To **increase** strength:
+            - Decrease hole diameter **h0**
+            - Reduce number of openings **N0**
+            - Increase plate thickness (tf, tw)
+            - Increase steel grade **fy**
+            - Reduce span **L**
+            """)
+        else:
+            st.markdown("### 🔧 Engineering Guidance — Reduce Strength")
+            st.write("""
+            To **reduce** strength:
+            - Increase hole diameter **h0**
+            - Increase spacing **s**
+            - Increase number of openings **N0**
+            - Reduce steel grade **fy**
+            - Increase span **L**
+            """)
+        return
 
-        st.markdown(f"""
-        ### 🎯 Target vs Best Available
-        - **Target wu:** {wu_target:.2f} kN/m  
-        - **Closest achievable wu:** {best_wu:.2f} kN/m  
-        - **Difference:** {abs(best_wu - wu_target):.2f} kN/m  
-        """)
-
-        st.markdown("### 🔧 Engineering Guidance")
-        st.write("""
-        To reach your target strength, modify the geometry:
-        - Reduce hole diameter h0  
-        - Reduce number of openings N0  
-        - Increase steel grade fy  
-        - Reduce span L  
-        """)
-
-        st.info("Adjust the design and run the inverse model again.")
-        return  # 🚫 STOP PIPELINE — DO NOT SHOW RESULTS
-
-
-
-    # ============================================================
-    # NORMAL PIPELINE CONTINUES (RESULTS ARE VALID)
-    # ============================================================
-
+    # One-time quantile warning
     if quantile_cross_issue:
-        st.info("ℹ️ In some cases, the p90 bound may be lower than p50. "
-                "This can happen in quantile regression and does not affect validity.")
+        st.info("ℹ️ In some cases, the upper bound (p90) is lower than the median. "
+                "This is normal in quantile regression.")
 
-    exact_match = df_res.iloc[0]
+    # Exact strength-matching section
+    exact_match = df_res.sort_values("AbsErr").iloc[0]
     st.subheader("🎯 Exact Strength-Matching Section")
     st.write(exact_match.to_frame().T)
 
+    # Optimal section
     st.subheader("🏅 Optimal Balanced Section (Lowest Score)")
-    st.write(df_res.sort_values("Score").head(1))
+    st.write(df_res.head(1))
 
+    # Full ranking table
     st.subheader("📊 Full Ranking Table")
     st.dataframe(df_res)
 
@@ -262,4 +244,3 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         df_res.to_csv(index=False),
         file_name="inverse_design_results.csv"
     )
-
