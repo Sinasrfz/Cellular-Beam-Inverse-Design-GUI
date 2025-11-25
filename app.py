@@ -70,7 +70,6 @@ def load_forward():
 def load_lookup():
     df = pd.read_csv(SECTION_LOOKUP)
 
-    # Normalize column names
     df.columns = (
         df.columns
         .str.replace(" ", "")
@@ -84,12 +83,11 @@ def load_lookup():
 def load_full_data():
     df = pd.read_excel(DATA_FILE)
 
-    # Normalize column names
     df.columns = (
         df.columns
         .str.replace(" ", "")
         .str.replace(",", "")
-        .str.replace("×", "x")    # handle fy×Area
+        .str.replace("×", "x")
         .str.strip()
     )
     return df
@@ -105,12 +103,21 @@ try:
     section_lookup = load_lookup()
     df_full = load_full_data()
 
-    # Quick validation
     if "SectionID" not in df_full.columns:
         st.error("❌ ERROR: Your dataset does NOT contain SectionID.")
         st.stop()
 
     st.success("✔ All models and data loaded successfully.")
+
+    # ------------------------------------------------------------
+    # IMPORTANT: STORE EVERYTHING FOR DIAGNOSTICS PAGE
+    # ------------------------------------------------------------
+    st.session_state["inv_model"] = inv_model
+    st.session_state["fwd_p50"] = fwd_p50
+    st.session_state["fwd_p10"] = fwd_p10
+    st.session_state["fwd_p90"] = fwd_p90
+    st.session_state["section_lookup"] = section_lookup
+    st.session_state["df_full"] = df_full
 
 except Exception as e:
     st.error("❌ Failed to load required assets.")
@@ -140,8 +147,14 @@ page = st.sidebar.radio(
 
 if page == "🏗 Designer Tool":
     import designer_page
-    designer_page.render(inv_model, fwd_p50, fwd_p10, fwd_p90,
-                         section_lookup, df_full)
+    designer_page.render(
+        st.session_state["inv_model"],
+        st.session_state["fwd_p50"],
+        st.session_state["fwd_p10"],
+        st.session_state["fwd_p90"],
+        st.session_state["section_lookup"],
+        st.session_state["df_full"]
+    )
 
 elif page == "📊 Diagnostics":
     import diagnostics_page
@@ -149,7 +162,7 @@ elif page == "📊 Diagnostics":
 
 elif page == "📁 Dataset Explorer":
     import explorer_page
-    explorer_page.render(df_full)
+    explorer_page.render(st.session_state["df_full"])
 
 elif page == "📘 Methodology":
     import methodology_page
