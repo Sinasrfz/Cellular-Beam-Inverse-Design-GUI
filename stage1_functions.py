@@ -1,6 +1,5 @@
 # ============================================================
 # Stage 1 – Utility Functions for Inverse Design GUI
-# (Applicability-aware code checks + proper scoring)
 # ============================================================
 
 import numpy as np
@@ -8,7 +7,7 @@ import pandas as pd
 
 
 # ------------------------------------------------------------
-# 1 — CODE CHECK FUNCTIONS (UNCHANGED)
+# CODE CHECK FUNCTIONS
 # ------------------------------------------------------------
 
 def check_SCI(H, bf, tw, tf, h0, s0, se):
@@ -26,7 +25,7 @@ def check_AISC(H, bf, tw, tf, h0, s):
 
 
 # ------------------------------------------------------------
-# 2 — WEIGHT FUNCTION
+# WEIGHT FUNCTION
 # ------------------------------------------------------------
 
 def compute_weight(H, bf, tw, tf, L, density=7850/1e9):
@@ -35,7 +34,7 @@ def compute_weight(H, bf, tw, tf, L, density=7850/1e9):
 
 
 # ------------------------------------------------------------
-# 3 — EMOJI MAPPING
+# EMOJI CONVERSION
 # ------------------------------------------------------------
 
 def code_to_emoji(val):
@@ -49,38 +48,25 @@ def code_to_emoji(val):
 
 
 # ------------------------------------------------------------
-# 4 — SCORE FUNCTION (Applicability Aware)
+# MULTI-OBJECTIVE SCORE (Applicability-aware)
 # ------------------------------------------------------------
 
 def multiobjective_score(wu_target, wu_pred, weight, sci, enm, aisc, failure_mode):
 
-    # ------------------------------
-    # A) Strength mismatch penalty
-    # ------------------------------
+    # Strength mismatch
     error_ratio = abs(wu_pred - wu_target) / wu_target
     f_strength = error_ratio * 20
 
-    # ------------------------------
-    # B) Weight penalty
-    # ------------------------------
+    # Weight
     f_weight = weight / 500
 
-    # ------------------------------
-    # C) Code penalties
-    # Only FAIL (0) penalized.
-    # N/A (-1) → NO PENALTY.
-    # ------------------------------
+    # Code penalties (ONLY FAIL = +100, N/A = 0)
     penalty_code = 0
-    if sci == 0:
-        penalty_code += 100
-    if enm == 0:
-        penalty_code += 100
-    if aisc == 0:
-        penalty_code += 100
+    if sci == 0: penalty_code += 100
+    if enm == 0: penalty_code += 100
+    if aisc == 0: penalty_code += 100
 
-    # ------------------------------
-    # D) Failure mode penalties
-    # ------------------------------
+    # Failure mode priority
     failure_priority = {
         "BGB": 0,
         "WPL": 2,
@@ -91,9 +77,4 @@ def multiobjective_score(wu_target, wu_pred, weight, sci, enm, aisc, failure_mod
     }
     f_failure = failure_priority.get(failure_mode, 10)
 
-    # ------------------------------
-    # FINAL SCORE
-    # Lower = better
-    # ------------------------------
-    score = f_strength + f_weight + penalty_code + f_failure
-    return score
+    return f_strength + f_weight + penalty_code + f_failure
