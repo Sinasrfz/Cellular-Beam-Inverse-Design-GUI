@@ -228,8 +228,6 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         st.markdown("### 🔧 Engineering Guidance")
         st.write("""
         To reach your target strength, modify the geometry:
-        - Increase section size (H, bf)
-        - Increase plate thickness (tw, tf)
         - Reduce hole diameter h0  
         - Reduce number of openings N0  
         - Increase steel grade fy  
@@ -264,3 +262,4 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         df_res.to_csv(index=False),
         file_name="inverse_design_results.csv"
     )
+
