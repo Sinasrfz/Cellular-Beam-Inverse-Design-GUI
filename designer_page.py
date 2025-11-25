@@ -1,7 +1,5 @@
 # ============================================================
-# designer_page.py — FINAL VERSION
-# Quantile Crossing (single message), N0 Check, GitHub Image,
-# No Code Summary Block, Fully Compatible with Main App
+# designer_page.py — FINAL VERSION (with Exact-Match Output)
 # ============================================================
 
 import streamlit as st
@@ -39,24 +37,24 @@ def render(inv_model, fwd_p50, fwd_p10, fwd_p90, section_lookup, df_full):
 
     # Derived geometry
     s0 = s - h0
-    se = (L - (h0 * N0 + s0 * (N0 - 1))) / 2
+    se = (L - (h0*N0 + s0*(N0 - 1))) / 2
 
     st.sidebar.write(f"Computed s0 = {s0:.1f} mm")
     st.sidebar.write(f"Computed se = {se:.1f} mm")
 
     # ============================================================
-    # ❗ Immediate feasibility check (BEFORE button!)
+    # Immediate feasibility check
     # ============================================================
     if se < 0:
         st.error(
             "❌ The computed end spacing *se* is negative.\n\n"
-            "This means the selected number of openings **N0** is not feasible.\n"
+            "This means the chosen number of openings **N0** is not feasible.\n"
             "➡ Reduce **N0** or increase spacing **s**."
         )
         return
 
     # ============================================================
-    # Insert Figure from GitHub Repository
+    # Image from GitHub
     # ============================================================
     st.image(
         "https://raw.githubusercontent.com/Sinasrfz/Cellular-Beam-Inverse-Design-GUI/main/Picture1.jpg",
@@ -85,19 +83,15 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
 
     st.subheader("🔍 Phase 1 — Inverse Model Prediction")
 
-    # Top candidates
+    # Candidate Sections
     proba = inv_model.predict_proba([[wu_target, L, h0, s, fy]])[0]
     top_sections = proba.argsort()[-10:][::-1]
 
     results = []
-
-    # ============================================================
-    # Detect quantile crossing (global flag)
-    # ============================================================
     crossing_detected = False
 
     # ============================================================
-    # Loop through all candidate sections
+    # Evaluate Each Candidate
     # ============================================================
     for sec in top_sections:
 
@@ -107,29 +101,26 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         tw = float(row.tw)
         tf = float(row.tf)
 
-        # Forward surrogate predictions
         X = np.array([[H, bf, tw, tf, L, h0, s, s0, se, fy]])
+
         wu50 = fwd_p50.predict(X)[0]
         wu10 = fwd_p10.predict(X)[0]
         wu90 = fwd_p90.predict(X)[0]
 
-        # ❗ Do NOT show message here — only set flag
         if wu90 < wu50:
-            crossing_detected = True
+            crossing_detected = True  # only set flag
 
         error_ratio = abs(wu50 - wu_target) / wu_target
 
-        # --------------------------------------------------------
-        # Code checks → Emoji conversion
-        # --------------------------------------------------------
+        # Code checks
         SCI = check_SCI(H, bf, tw, tf, h0, s0, se)
         ENM = check_ENM(H, bf, tw, tf, h0, s0)
         AISC = check_AISC(H, bf, tw, tf, h0, s)
 
-        def to_emoji(val):
-            if val == -1:
+        def to_emoji(v):
+            if v == -1:
                 return "⚪ N/A"
-            elif val == 1:
+            elif v == 1:
                 return "🟩 PASS"
             else:
                 return "🟥 FAIL"
@@ -138,7 +129,6 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         ENM_e = to_emoji(ENM)
         AISC_e = to_emoji(AISC)
 
-        # Failure mode
         fm_series = df_full[df_full.SectionID == sec]["Failure_mode"]
         fm = fm_series.mode()[0] if not fm_series.mode().empty else "Unknown"
 
@@ -163,43 +153,51 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
             "Score": score
         })
 
-    # Build DataFrame
     df_res = pd.DataFrame(results)
     df_res = df_res.sort_values("Score", ascending=True).reset_index(drop=True)
 
     # ============================================================
-    # Show quantile-crossing info (ONLY ONCE)
+    # Display quantile crossing warning (only once)
     # ============================================================
     if crossing_detected:
         st.info(
             "🔍 *Note on prediction bounds:* For some candidate sections, "
-            "the p90 prediction is slightly smaller than p50. This is normal "
-            "in quantile regression (*quantile crossing*) and does **not** "
-            "affect the validity of the design."
+            "the p90 value is slightly below p50. This is normal in quantile "
+            "regression (*quantile crossing*) and does **not** affect the "
+            "design validity."
         )
 
     # ============================================================
-    # Strength match indicator
+    # 1️⃣ Optimal Balanced Section (Lowest Score)
     # ============================================================
-    st.subheader("📏 Strength Match Indicator")
-
+    st.subheader("🏅 Optimal Balanced Section (Lowest Score)")
     best = df_res.iloc[0]
+    st.write(best.to_frame().T)
+
     diff = best["Wu_50"] - wu_target
     diff_percent = diff / wu_target * 100
 
     if abs(diff) <= 0.02 * wu_target:
-        st.success(f"✔ Strength perfectly matched ({diff_percent:+.2f}%).")
+        st.success(f"✔ Strength matched ({diff_percent:+.2f}%).")
     elif abs(diff) <= 0.10 * wu_target:
         st.warning(f"⚠ Moderately matched ({diff_percent:+.2f}%).")
     else:
         st.error(f"❌ Strength mismatch ({diff_percent:+.2f}%).")
 
-    # ============================================================
-    # Results Display
-    # ============================================================
-    st.subheader("🏅 Recommended Section")
-    st.write(df_res.head(1))
 
+    # ============================================================
+    # 2️⃣ Exact Strength-Matching Section (NEW)
+    # ============================================================
+    st.subheader("🎯 Exact Strength-Matching Section (Closest to Target)")
+
+    df_res["AbsErr"] = abs(df_res["Wu_50"] - wu_target)
+    exact_match = df_res.sort_values("AbsErr").iloc[0]
+
+    st.write(exact_match.to_frame().T)
+
+    # ============================================================
+    # FULL RANKING TABLE
+    # ============================================================
     st.subheader("📊 Full Ranking Table")
     st.dataframe(df_res)
 
