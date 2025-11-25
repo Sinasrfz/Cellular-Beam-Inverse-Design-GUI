@@ -1,5 +1,5 @@
 # ============================================================
-# designer_page.py — Core Inverse Design (3-Stage Pipeline)
+# designer_page.py — Practical Inverse Design (Discrete + PSO Refinement)
 # ============================================================
 
 import streamlit as st
@@ -25,7 +25,7 @@ plt.rcParams["font.size"] = 20
 
 def render(inv_model, fwd_p50, fwd_p10, fwd_p90, section_lookup, df_full):
 
-    st.header("🏗 Designer Tool — 3-Stage Inverse Design")
+    st.header("🏗 Designer Tool — 3-Stage Inverse Design (with PSO Refinement)")
 
     st.sidebar.subheader("🧮 Design Inputs")
     wu_target = st.sidebar.number_input("Target wu (kN/m)", 5.0, 300.0, 30.0)
@@ -68,9 +68,10 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
     relaxed_results = []
     all_results = []
 
-    # --------------------------------------------------------
-    # Evaluate each candidate
-    # --------------------------------------------------------
+    # ============================================================
+    # For each inverse-selected section → do PSO refinement
+    # ============================================================
+
     for sec in top_sections:
 
         row = section_lookup[section_lookup.SectionID == sec].iloc[0]
@@ -79,7 +80,107 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         tw = float(row.tw)
         tf = float(row.tf)
 
-        # Forward surrogate prediction
+        # ======================================================
+        # HYBRID INVERSE DESIGN — DISCRETE PSO REFINEMENT (NEW)
+        # ======================================================
+
+        # 1. Get all manufacturable dimension options
+        H_values  = sorted(df_full["H"].unique())
+        bf_values = sorted(df_full["bf"].unique())
+        tw_values = sorted(df_full["tw"].unique())
+        tf_values = sorted(df_full["tf"].unique())
+
+        # Convert current geometry to nearest index
+        def nearest_index(values, target):
+            return int(np.argmin([abs(v - target) for v in values]))
+
+        init_H_idx  = nearest_index(H_values,  H)
+        init_bf_idx = nearest_index(bf_values, bf)
+        init_tw_idx = nearest_index(tw_values, tw)
+        init_tf_idx = nearest_index(tf_values, tf)
+
+        # ------------------------------------------------------
+        # PSO PARAMETERS
+        # ------------------------------------------------------
+        num_particles = 10
+        num_iters = 20
+        w = 0.7
+        c1 = 1.4
+        c2 = 1.4
+
+        # Particle positions (indices)
+        pos = np.zeros((num_particles, 4))
+        vel = np.zeros((num_particles, 4))
+
+        # Initialize all particles at the catalog section
+        for i in range(num_particles):
+            pos[i] = [init_H_idx, init_bf_idx, init_tw_idx, init_tf_idx]
+
+        # Fitness function
+        def fitness(idx_vec):
+            hi = int(np.clip(round(idx_vec[0]), 0, len(H_values)-1))
+            bfi = int(np.clip(round(idx_vec[1]), 0, len(bf_values)-1))
+            twi = int(np.clip(round(idx_vec[2]), 0, len(tw_values)-1))
+            tfi = int(np.clip(round(idx_vec[3]), 0, len(tf_values)-1))
+
+            Hc  = H_values[hi]
+            bfc = bf_values[bfi]
+            twc = tw_values[twi]
+            tfc = tf_values[tfi]
+
+            Xp = np.array([[Hc, bfc, twc, tfc, L, h0, s, s0, se, fy]])
+            wu_p50 = fwd_p50.predict(Xp)[0]
+
+            return abs(wu_p50 - wu_target)
+
+        # Evaluate initial
+        pbest = pos.copy()
+        pbest_fit = np.array([fitness(p) for p in pos])
+
+        gbest = pbest[np.argmin(pbest_fit)]
+        gbest_fit = np.min(pbest_fit)
+
+        # ------------------------------------------------------
+        # PSO MAIN LOOP
+        # ------------------------------------------------------
+        for _ in range(num_iters):
+            for i in range(num_particles):
+
+                vel[i] = (
+                    w * vel[i]
+                    + c1 * np.random.rand() * (pbest[i] - pos[i])
+                    + c2 * np.random.rand() * (gbest    - pos[i])
+                )
+
+                pos[i] += vel[i]
+
+                fit = fitness(pos[i])
+
+                if fit < pbest_fit[i]:
+                    pbest[i] = pos[i].copy()
+                    pbest_fit[i] = fit
+
+                    if fit < gbest_fit:
+                        gbest = pos[i].copy()
+                        gbest_fit = fit
+
+        # ------------------------------------------------------
+        # FINAL PSO-OPTIMIZED GEOMETRY (DISCRETE)
+        # ------------------------------------------------------
+        final_hi  = int(np.clip(round(gbest[0]), 0, len(H_values)-1))
+        final_bfi = int(np.clip(round(gbest[1]), 0, len(bf_values)-1))
+        final_twi = int(np.clip(round(gbest[2]), 0, len(tw_values)-1))
+        final_tfi = int(np.clip(round(gbest[3]), 0, len(tf_values)-1))
+
+        # Override geometry with optimized values
+        H  = H_values[final_hi]
+        bf = bf_values[final_bfi]
+        tw = tw_values[final_twi]
+        tf = tf_values[final_tfi]
+
+        # ------------------------------------------------------
+        # Forward surrogate prediction ON OPTIMIZED GEOMETRY
+        # ------------------------------------------------------
         X = np.array([[H, bf, tw, tf, L, h0, s, s0, se, fy]])
         wu50 = fwd_p50.predict(X)[0]
         wu10 = fwd_p10.predict(X)[0]
@@ -96,10 +197,8 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         fm_series = df_full[df_full.SectionID == sec]["Failure_mode"]
         fm = fm_series.mode()[0] if not fm_series.mode().empty else "Unknown"
 
-        # Weight
         weight = compute_weight(H, bf, tw, tf, L)
 
-        # Score
         score = multiobjective_score(
             wu_target, wu50, weight, SCI, ENM, AISC, fm
         )
@@ -117,7 +216,6 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
             "Score": score
         }
 
-        # Feasibility classifications
         if error_ratio <= 0.02:
             strict_results.append(row_entry)
         if error_ratio <= 0.10:
@@ -126,28 +224,22 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         all_results.append(row_entry)
 
     # ============================================================
-    # PRIORITY OUTPUT SYSTEM (SORTED BY SCORE)
+    # Ranking and final outputs (unchanged)
     # ============================================================
 
     if strict_results:
         df_res = pd.DataFrame(strict_results)
         st.success("✔ Found designs within ±2% accuracy.")
-
     elif relaxed_results:
         df_res = pd.DataFrame(relaxed_results)
         st.warning("⚠ Showing ±10% feasible designs.")
-
     else:
         df_res = pd.DataFrame(all_results)
         st.error("⚠ No match in ±10%. Showing closest available design.")
 
-    # 🔥 REAL FIX: FORCE FINAL SORT ONLY BY SCORE
     df_res = df_res.sort_values("Score", ascending=True).reset_index(drop=True)
 
-    # ============================================================
-    # Strength Match Indicator
-    # ============================================================
-
+    # Strength Match Summary
     st.subheader("📏 Strength Match Indicator")
 
     best = df_res.iloc[0]
@@ -161,10 +253,7 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
     else:
         st.error(f"❌ Strength mismatch ({diff_percent:+.2f}%).")
 
-    # ============================================================
-    # Code Check Color Indicators
-    # ============================================================
-
+    # Code Check Summary
     def check_color(val):
         return "🟩 PASS" if val == 1 else "🟥 FAIL"
 
@@ -175,10 +264,7 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         "AISC": check_color(best["AISC"])
     })
 
-    # ============================================================
     # Geometry Plot
-    # ============================================================
-
     st.markdown("### 📐 Recommended Geometry")
 
     fig, ax = plt.subplots(figsize=(6, 4))
@@ -199,10 +285,6 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
     ax.axis("off")
 
     st.pyplot(fig)
-
-    # ============================================================
-    # Final Tables
-    # ============================================================
 
     st.subheader("🏅 Recommended Section")
     st.write(df_res.head(1))
