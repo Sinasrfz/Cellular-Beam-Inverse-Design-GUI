@@ -1,5 +1,6 @@
 # ============================================================
 # designer_page.py — 3-Stage Inverse Design (Persistent Version)
+# FIXED: No duplicate outputs + safe clear button
 # ============================================================
 
 import streamlit as st
@@ -24,7 +25,6 @@ plt.rcParams["font.size"] = 20
 # ------------------------------------------------------------
 # INITIALIZE SESSION STATE
 # ------------------------------------------------------------
-
 def init_session():
     if "designer_inputs" not in st.session_state:
         st.session_state.designer_inputs = {}
@@ -38,24 +38,37 @@ def init_session():
     if "designer_optimal" not in st.session_state:
         st.session_state.designer_optimal = None
 
+    if "clear_flag" not in st.session_state:
+        st.session_state.clear_flag = False
+
 
 # ------------------------------------------------------------
 # MAIN RENDER FUNCTION
 # ------------------------------------------------------------
-
 def render(inv_model, fwd_p50, fwd_p10, fwd_p90, section_lookup, df_full):
 
     init_session()
 
+    # If clear was triggered → reset & rerun safely
+    if st.session_state.clear_flag:
+        for key in [
+            "designer_inputs",
+            "designer_results",
+            "designer_best",
+            "designer_optimal",
+        ]:
+            st.session_state.pop(key, None)
+        st.session_state.clear_flag = False
+        st.session_state.designer_inputs = {}
+        st.experimental_rerun()
+
     st.header("🏗 Designer Tool — 3-Stage Inverse Design")
 
     # -------------------------
-    # CLEAR BUTTON
+    # CLEAR BUTTON (SAFE)
     # -------------------------
     if st.button("🧹 Clear All"):
-        for key in ["designer_inputs", "designer_results",
-                    "designer_best", "designer_optimal"]:
-            st.session_state.pop(key, None)
+        st.session_state.clear_flag = True
         st.experimental_rerun()
 
     st.sidebar.subheader("🧮 Design Inputs")
@@ -81,7 +94,7 @@ def render(inv_model, fwd_p50, fwd_p10, fwd_p90, section_lookup, df_full):
         "Number of openings N0", 1, 50, inputs.get("N0", 10)
     )
 
-    # Save inputs persistently
+    # Save persistently
     st.session_state.designer_inputs.update({
         "wu_target": wu_target,
         "L": L, "h0": h0,
@@ -95,7 +108,6 @@ def render(inv_model, fwd_p50, fwd_p10, fwd_p90, section_lookup, df_full):
     st.sidebar.write(f"Computed s0 = {s0:.1f} mm")
     st.sidebar.write(f"Computed se = {se:.1f} mm")
 
-    # Feasibility check
     if se < 0:
         st.error("❌ Selected N0 is NOT feasible for this span. Reduce N0.")
         return
@@ -109,62 +121,55 @@ def render(inv_model, fwd_p50, fwd_p10, fwd_p90, section_lookup, df_full):
             inv_model, fwd_p50, fwd_p10, fwd_p90,
             section_lookup, df_full
         )
+        st.experimental_rerun()
 
     # -------------------------
-    # DISPLAY SAVED RESULTS (persistent)
+    # DISPLAY RESULTS (ONLY HERE)
     # -------------------------
     if st.session_state.designer_results is not None:
-        st.subheader("🏅 Optimal Balanced Section")
-        st.write(st.session_state.designer_optimal.to_frame().T)
 
         st.subheader("🎯 Exact Strength-Matching Section")
         st.write(st.session_state.designer_best.to_frame().T)
 
+        st.subheader("🏅 Optimal Balanced Section (Lowest Score)")
+        st.write(st.session_state.designer_optimal.to_frame().T)
+
         st.subheader("📊 Full Ranking Table")
         st.dataframe(st.session_state.designer_results)
 
-        # Multi-format export
+        # Multi-format exports
         df_res = st.session_state.designer_results
 
-        st.download_button(
-            "Download CSV",
+        st.download_button("Download CSV",
             df_res.to_csv(index=False),
             file_name="inverse_design_results.csv"
         )
 
-        # Excel export
         buffer = io.BytesIO()
         df_res.to_excel(buffer, index=False)
-        st.download_button(
-            "Download Excel (.xlsx)",
+        st.download_button("Download Excel (.xlsx)",
             buffer.getvalue(),
             file_name="inverse_design_results.xlsx"
         )
 
-        # JSON export
-        st.download_button(
-            "Download JSON",
+        st.download_button("Download JSON",
             df_res.to_json(orient="records", indent=2),
             file_name="inverse_design_results.json"
         )
 
-        # TXT export
-        st.download_button(
-            "Download TXT",
+        st.download_button("Download TXT",
             df_res.to_string(),
             file_name="inverse_design_results.txt"
         )
 
 
-# ------------------------------------------------------------
-# CORE PIPELINE
-# ------------------------------------------------------------
 
+# ------------------------------------------------------------
+# CORE PIPELINE (DOES NOT DISPLAY ANYTHING)
+# ------------------------------------------------------------
 def run_inverse(wu_target, L, h0, s, s0, se, fy,
                 inv_model, fwd_p50, fwd_p10, fwd_p90,
                 section_lookup, df_full):
-
-    st.subheader("🔍 Phase 1 — Inverse Model Prediction")
 
     proba = inv_model.predict_proba([[wu_target, L, h0, s, fy]])[0]
     top_sections = proba.argsort()[-10:][::-1]
@@ -190,13 +195,12 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
 
         error_ratio = abs(Pred_wu - wu_target) / wu_target
 
-        # Applicability
         app = df_full[df_full.SectionID == sec].iloc[0]
         SCI_app = app["SCI_applicable"]
         ENM_app = app["ENM_applicable"]
         AISC_app = app["AISC_applicable"]
 
-        SCI = ENM = AISC = -1  # N/A default
+        SCI = ENM = AISC = -1
         if SCI_app == 1:
             SCI = check_SCI(H, bf, tw, tf, h0, s0, se)
         if ENM_app == 1:
@@ -233,28 +237,10 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
 
     df_res = pd.DataFrame(results).sort_values("Score").reset_index(drop=True)
 
-    if quantile_cross_issue:
-        st.info("ℹ️ In some cases, the upper bound is lower than the median. Normal for quantile regression.")
-
-    # Best by strength match
     exact_match = df_res.sort_values("AbsErr").iloc[0]
-
-    # Best by score
     optimal = df_res.iloc[0]
 
-    # -------------------------
-    # Save results persistently
-    # -------------------------
+    # Save only
     st.session_state.designer_results = df_res
     st.session_state.designer_best = exact_match
     st.session_state.designer_optimal = optimal
-
-    # Display them immediately
-    st.subheader("🎯 Exact Strength-Matching Section")
-    st.write(exact_match.to_frame().T)
-
-    st.subheader("🏅 Optimal Balanced Section (Lowest Score)")
-    st.write(optimal.to_frame().T)
-
-    st.subheader("📊 Full Ranking Table")
-    st.dataframe(df_res)
