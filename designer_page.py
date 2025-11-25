@@ -84,11 +84,12 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
 
     st.subheader("🔍 Phase 1 — Inverse Model Prediction")
 
-    # Top candidates from inverse model
+    # Top candidates
     proba = inv_model.predict_proba([[wu_target, L, h0, s, fy]])[0]
     top_sections = proba.argsort()[-10:][::-1]
 
     results = []
+    crossing_detected = False   # <--- detect quantile crossing
 
     # ============================================================
     # Loop Through Candidates
@@ -107,22 +108,19 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         wu10 = fwd_p10.predict(X)[0]
         wu90 = fwd_p90.predict(X)[0]
 
-        # ❗ Quantile crossing warning
+        # ❗ Quantile crossing detection (NO message here)
         if wu90 < wu50:
-            st.info(
-                "🔍 *Note on prediction bounds:* p90 is slightly lower than p50. "
-                "This is normal in quantile regression (quantile crossing) "
-                "and does not affect the design validity."
-            )
+            crossing_detected = True
 
         error_ratio = abs(wu50 - wu_target) / wu_target
 
-        # Code checks
+        # --------------------------------------------------------
+        # Code checks with Emoji conversion
+        # --------------------------------------------------------
         SCI = check_SCI(H, bf, tw, tf, h0, s0, se)
         ENM = check_ENM(H, bf, tw, tf, h0, s0)
         AISC = check_AISC(H, bf, tw, tf, h0, s)
 
-        # Convert to Emoji
         def make_emoji(val):
             if val == -1:
                 return "⚪ N/A"
@@ -161,9 +159,20 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
             "Score": score
         })
 
-    # DataFrame and Sort
+    # DataFrame
     df_res = pd.DataFrame(results)
     df_res = df_res.sort_values("Score", ascending=True).reset_index(drop=True)
+
+    # ============================================================
+    # Show quantile-crossing warning ONLY if detected
+    # ============================================================
+    if crossing_detected:
+        st.info(
+            "🔍 *Note on prediction bounds:* For some candidate sections, the "
+            "p90 prediction was slightly lower than p50. This is normal in "
+            "quantile regression (quantile crossing) and does **not** affect "
+            "the validity of the design."
+        )
 
     # ============================================================
     # Strength Match Indicator
