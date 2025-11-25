@@ -21,12 +21,12 @@ def render():
     st.header("📊 Diagnostics — Model Validation & Data Coverage")
 
     st.write("""
-    This page provides a full diagnostic view of the inverse model, 
+    This page provides a diagnostic view of the inverse model, 
     forward surrogate, dataset coverage, error distributions, and 
     reliability indicators for engineering use.
     """)
 
-    # Load stored objects from session_state (provided by app.py)
+    # Load stored objects from session_state
     inv_model = st.session_state.get("inv_model", None)
     fwd_p50 = st.session_state.get("fwd_p50", None)
     fwd_p10 = st.session_state.get("fwd_p10", None)
@@ -44,7 +44,7 @@ def render():
 
     st.markdown("### Inverse Model (CatBoost Classifier)")
     st.write(f"Model type: `{type(inv_model).__name__}`")
-    st.write("Number of classes (sections):", len(inv_model.classes_))
+    st.write("Number of predicted classes (sections):", len(inv_model.classes_))
 
     if hasattr(inv_model, "feature_importances_"):
         st.markdown("#### Feature Importance")
@@ -60,22 +60,22 @@ def render():
     st.markdown("---")
 
     # --------------------------------------------------------
-    # SECTION 2 — FORWARD MODEL ERROR ANALYSIS
+    # SECTION 2 — FORWARD SURROGATE ACCURACY
     # --------------------------------------------------------
     st.subheader("📈 Forward Surrogate Accuracy")
 
-    st.write("Comparing surrogate predictions vs. FEA values from dataset.")
+    st.write("Comparison of surrogate predictions vs. FEA values from dataset.")
 
-    # Build test X and y
-    X = df_full[["H","bf","tw","tf","L","h0","s","s0","se","fy"]].values
+    # Build X and y
+    feature_cols = ["H","bf","tw","tf","L","h0","s","s0","se","fy"]
+
+    X = df_full[feature_cols].values
     y = df_full["wu_FEA"].values
-
 
     pred50 = fwd_p50.predict(X)
     pred10 = fwd_p10.predict(X)
     pred90 = fwd_p90.predict(X)
 
-    # Errors
     err50 = pred50 - y
 
     st.markdown("#### P50 Error Statistics")
@@ -101,7 +101,7 @@ def render():
     ax.set_ylabel("Count")
     st.pyplot(fig)
 
-    # Quantile check
+    # Quantile coverage
     coverage = np.mean((y >= pred10) & (y <= pred90))
     st.write(f"Quantile P10–P90 Coverage: **{coverage*100:.1f}%**")
 
@@ -112,7 +112,6 @@ def render():
     # --------------------------------------------------------
     st.subheader("🌐 Dataset Coverage — Nearest Neighbor Distance")
 
-    feature_cols = ["H", "bf", "tw", "tf", "L", "h0", "s", "s0", "se", "fy"]
     Xnorm = (df_full[feature_cols] - df_full[feature_cols].min()) / (
         df_full[feature_cols].max() - df_full[feature_cols].min()
     )
@@ -121,7 +120,7 @@ def render():
     nn.fit(Xnorm.values)
 
     distances, _ = nn.kneighbors(Xnorm.values)
-    dist_mean = distances[:,1:].mean(axis=1)  # exclude self
+    dist_mean = distances[:,1:].mean(axis=1)  # exclude distance to self
 
     st.write(f"Mean normalized distance: **{np.mean(dist_mean):.3f}**")
     st.write(f"95th percentile distance: **{np.percentile(dist_mean,95):.3f}**")
@@ -165,25 +164,24 @@ def render():
 
     param = st.selectbox(
         "Select parameter to vary:",
-        ["L","ho","s","fy"]
+        ["L","h0","s","fy"]
     )
 
-    st.write("This shows how P50 prediction changes when modifying a single parameter ±20%.")
+    st.write("This shows how P50 prediction changes when modifying one parameter ±20%.")
 
     # Baseline = mean of dataset
-    base = df_full[feature_cols].mean().values
+    base_vec = df_full[feature_cols].mean().values
 
     idx = feature_cols.index(param)
-    baseline_value = base[idx]
+    baseline_value = base_vec[idx]
 
-    values = np.linspace(0.8*baseline_value, 1.2*baseline_value, 40)
+    values = np.linspace(0.8 * baseline_value, 1.2 * baseline_value, 40)
 
     preds = []
-
     for v in values:
-        vec = base.copy()
-        vec[idx] = v
-        preds.append(fwd_p50.predict(vec.reshape(1,-1))[0])
+        temp = base_vec.copy()
+        temp[idx] = v
+        preds.append(fwd_p50.predict(temp.reshape(1,-1))[0])
 
     fig, ax = plt.subplots(figsize=(6,4))
     ax.plot(values, preds)
@@ -195,7 +193,7 @@ def render():
     st.markdown("---")
 
     # --------------------------------------------------------
-    # SECTION 7 — AUTO-GENERATED MODEL VALIDATION REPORT
+    # SECTION 7 — MODEL VALIDATION SUMMARY
     # --------------------------------------------------------
     st.subheader("📝 Validation Report")
 
@@ -203,15 +201,12 @@ def render():
     - Forward P50 MAE = {np.mean(np.abs(err50)):.3f} kN/m  
     - Forward P50 RMSE = {np.sqrt(np.mean(err50**2)):.3f} kN/m  
     - Quantile coverage (10–90%) = {coverage*100:.1f}%  
-    - NN mean training distance = {np.mean(dist_mean):.3f}  
-    - NN 95% distance = {np.percentile(dist_mean,95):.3f}  
+    - Nearest-neighbor mean distance = {np.mean(dist_mean):.3f}  
+    - 95% distance = {np.percentile(dist_mean,95):.3f}  
 
-    These metrics demonstrate that the surrogate model has good overall fit, 
-    well-calibrated quantile bounds, and reliable coverage within the 
-    dataset's domain. Distances help identify extrapolation regions 
-    where predictions may be less reliable.
+    These metrics demonstrate that the surrogate model has overall good fit 
+    on the dataset, with reliable quantile bounds and broad coverage within 
+    the training domain. The nearest-neighbor analysis highlights potential 
+    regions where model extrapolation may occur.
     """)
-
-
-
 
