@@ -179,7 +179,8 @@ def render():
             return "🟨 Caution"
         else:
             return "🟥 Outside"
-
+    def f(x):
+        return f"{x:.3f}"
     # Classification
     st.markdown("### Validity Status")
 
@@ -218,6 +219,7 @@ def render():
     • Mean NN distance = {np.mean(dvals):.3f}  
     • 95% NN distance = {np.percentile(dvals,95):.3f}  
     """)
+
 
 
 
