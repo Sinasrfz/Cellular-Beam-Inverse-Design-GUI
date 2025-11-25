@@ -112,7 +112,7 @@ def render():
     # --------------------------------------------------------
     st.subheader("🌐 Dataset Coverage — Nearest Neighbor Distance")
 
-    feature_cols = ["H","bf","tw","tf","L","ho","s","so","se","fy"]
+    feature_cols = ["H", "bf", "tw", "tf", "L", "h0", "s", "s0", "se", "fy"]
     Xnorm = (df_full[feature_cols] - df_full[feature_cols].min()) / (
         df_full[feature_cols].max() - df_full[feature_cols].min()
     )
@@ -211,6 +211,7 @@ def render():
     dataset's domain. Distances help identify extrapolation regions 
     where predictions may be less reliable.
     """)
+
 
 
 
