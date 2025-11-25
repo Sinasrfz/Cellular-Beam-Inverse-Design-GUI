@@ -1,5 +1,5 @@
 # ============================================================
-# designer_page.py — Hybrid PSO + Emoji Table + GitHub Image + N0 Check
+# designer_page.py — Hybrid PSO + Emoji Table + GitHub Image + Instant N0 Check
 # ============================================================
 
 import streamlit as st
@@ -35,36 +35,44 @@ def render(inv_model, fwd_p50, fwd_p10, fwd_p90, section_lookup, df_full):
     fy = st.sidebar.number_input("Steel fy (MPa)", 200.0, 600.0, 355.0)
     N0 = st.sidebar.number_input("Number of openings N0", 1, 50, 10)
 
-    # derived geometry
+    # ============================================================
+    # DERIVED GEOMETRY
+    # ============================================================
+
     s0 = s - h0
     se = (L - (h0 * N0 + s0 * (N0 - 1))) / 2
 
     st.sidebar.write(f"Computed s0 = {s0:.1f} mm")
     st.sidebar.write(f"Computed se = {se:.1f} mm")
 
-    # ========================================================
-    # DISPLAY YOUR GITHUB IMAGE
-    # ========================================================
+    # ============================================================
+    # 🔥 INSTANT FEASIBILITY CHECK (NO BUTTON CLICK REQUIRED)
+    # ============================================================
+
+    if se < 0:
+        st.error(
+            "❌ *Negative end spacing detected.*\n\n"
+            "The selected number of openings **N0** is not feasible for the given span and spacing.\n"
+            "➡ Reduce **N0** or increase **s**."
+        )
+        return   # completely stops rendering the rest of the page
+
+
+    # ============================================================
+    # SHOW YOUR GITHUB IMAGE
+    # ============================================================
+
     st.image(
         "https://raw.githubusercontent.com/Sinasrfz/Cellular-Beam-Inverse-Design-GUI/main/Picture1.jpg",
         caption="Cellular Beam Geometry",
         use_column_width=True
     )
 
-    # ========================================================
+    # ============================================================
     # RUN BUTTON
-    # ========================================================
+    # ============================================================
+
     if st.button("Run Inverse Design", type="primary"):
-
-        # N0 feasibility check
-        if se < 0:
-            st.error(
-                "❌ The computed end spacing *se* is negative.\n\n"
-                "This means the selected number of openings **N0** is not feasible for this span.\n"
-                "➡ Reduce **N0** or increase **s**."
-            )
-            st.stop()
-
         run_inverse(
             wu_target, L, h0, s, s0, se, fy,
             inv_model, fwd_p50, fwd_p10, fwd_p90,
@@ -99,13 +107,13 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
     def nearest_index(values, target):
         return int(np.argmin([abs(v - target) for v in values]))
 
+
     # ============================================================
     # PROCESS EACH SECTION
     # ============================================================
 
     for sec in top_sections:
 
-        # Base geometry
         row = section_lookup[section_lookup.SectionID == sec].iloc[0]
         H_base = int(row.H)
         bf_base = int(row.bf)
@@ -117,7 +125,7 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         ENM_app  = int(row_full["ENM_applicable"])
         AISC_app = int(row_full["AISC_applicable"])
 
-        # Neighborhood search window
+        # Neighborhood search ranges
         H_idx0  = nearest_index(H_values, H_base)
         bf_idx0 = nearest_index(bf_values, bf_base)
         tw_idx0 = nearest_index(tw_values, tw_base)
@@ -125,8 +133,8 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
 
         def local_range(values, idx):
             lo = max(idx - 1, 0)
-            hi = min(idx + 1, len(values) - 1)
-            return list(range(lo, hi + 1))
+            hi = min(idx + 1, len(values)-1)
+            return list(range(lo, hi+1))
 
         H_idx_list  = local_range(H_values, H_idx0)
         bf_idx_list = local_range(bf_values, bf_idx0)
@@ -134,7 +142,7 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         tf_idx_list = local_range(tf_values, tf_idx0)
 
         # ======================================================
-        # PSO (Discrete + Random Init)
+        # HYBRID PSO OPTIMIZATION (DISCRETE)
         # ======================================================
 
         num_particles = 12
@@ -149,6 +157,7 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         def rand(lst):
             return np.random.choice(lst)
 
+        # Randomized initial population
         for i in range(num_particles):
             pos[i] = [
                 rand(H_idx_list),
@@ -157,7 +166,6 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
                 rand(tf_idx_list)
             ]
 
-        # Fitness function
         def fitness(idx_vec):
             hi  = int(np.clip(round(idx_vec[0]), 0, len(H_values)-1))
             bfi = int(np.clip(round(idx_vec[1]), 0, len(bf_values)-1))
@@ -182,6 +190,7 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         # PSO LOOP
         for _ in range(num_iters):
             for i in range(num_particles):
+
                 vel[i] = (
                     w * vel[i]
                     + c1*np.random.rand()*(pbest[i] - pos[i])
@@ -199,7 +208,8 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
                         gbest = pos[i].copy()
                         gbest_fit = fit
 
-        # Final discrete geometry
+
+        # Final discrete geometry from PSO
         final_hi  = int(np.clip(round(gbest[0]), 0, len(H_values)-1))
         final_bfi = int(np.clip(round(gbest[1]), 0, len(bf_values)-1))
         final_twi = int(np.clip(round(gbest[2]), 0, len(tw_values)-1))
@@ -210,7 +220,8 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         tw = tw_values[final_twi]
         tf = tf_values[final_tfi]
 
-        # Forward surrogate predictions
+
+        # Surrogate forward prediction
         X = np.array([[H, bf, tw, tf, L, h0, s, s0, se, fy]])
         wu50 = fwd_p50.predict(X)[0]
         wu10 = fwd_p10.predict(X)[0]
@@ -218,22 +229,26 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
 
         error_ratio = abs(wu50 - wu_target) / wu_target
 
+
         # ======================================================
-        # CODE CHECKS (APPLICABILITY-AWARE)
+        # APPLICABILITY-AWARE CODE CHECKS
         # ======================================================
 
         SCI = -1 if SCI_app == 0 else check_SCI(H, bf, tw, tf, h0, s0, se)
         ENM = -1 if ENM_app == 0 else check_ENM(H, bf, tw, tf, h0, s0)
         AISC = -1 if AISC_app == 0 else check_AISC(H, bf, tw, tf, h0, s)
 
-        # Failure mode
+        # failure mode
         fm_series = df_full[df_full.SectionID == sec]["Failure_mode"]
         fm = fm_series.mode()[0] if not fm_series.mode().empty else "Unknown"
 
-        # Weight
+        # weight
         weight = compute_weight(H, bf, tw, tf, L)
 
-        # Score with -1 → N/A fix
+
+        # ====================
+        # MULTI-OBJECTIVE SCORE
+        # ====================
         score = multiobjective_score(
             wu_target, wu50, weight,
             (1 if SCI == 1 else 0 if SCI == 0 else -1),
@@ -260,27 +275,31 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
 
         all_results.append(row_entry)
 
+
     # ============================================================
-    # BUILD FINAL DF
+    # BUILD FINAL RESULT TABLE
     # ============================================================
 
     if strict_results:
         df_res = pd.DataFrame(strict_results)
         st.success("✔ Found designs within ±2% accuracy.")
+
     elif relaxed_results:
         df_res = pd.DataFrame(relaxed_results)
         st.warning("⚠ Showing ±10% feasible designs.")
+
     else:
         df_res = pd.DataFrame(all_results)
         st.error("⚠ No match within ±10%. Showing closest designs.")
 
-    # Unique solutions
-    df_res = df_res.drop_duplicates(subset=["H","bf","tw","tf"]).reset_index(drop=True)
 
+    # UNIQUE GEOMETRIES ONLY
+    df_res = df_res.drop_duplicates(subset=["H","bf","tw","tf"]).reset_index(drop=True)
     df_res = df_res.sort_values("Score", ascending=True).reset_index(drop=True)
 
+
     # ============================================================
-    # Strength Summary
+    # STRENGTH MATCH INDICATOR
     # ============================================================
 
     st.subheader("📏 Strength Match Indicator")
@@ -296,8 +315,9 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
     else:
         st.error(f"❌ Weak match ({diff_percent:+.2f}%).")
 
+
     # ============================================================
-    # CODE CHECK SUMMARY
+    # CODE CHECK SUMMARY (EMOJI)
     # ============================================================
 
     def emoji_code(val):
@@ -314,6 +334,7 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         "ENM":  emoji_code(best["ENM"]),
         "AISC": emoji_code(best["AISC"]),
     })
+
 
     # ============================================================
     # GEOMETRY PLOT
@@ -338,6 +359,7 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
     ax.axis("off")
 
     st.pyplot(fig)
+
 
     # ============================================================
     # EMOJI TABLE OUTPUT
