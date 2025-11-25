@@ -1,12 +1,11 @@
 # ============================================================
-# designer_page.py — 3-Stage Inverse Design (Stable Version)
+# designer_page.py — 3-Stage Inverse Design (Updated Version)
 # ============================================================
 
 import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import io
 
 from stage1_functions import (
     check_SCI,
@@ -22,166 +21,102 @@ plt.rcParams["font.size"] = 20
 
 
 # ------------------------------------------------------------
-# INITIALIZE SESSION STATE
-# ------------------------------------------------------------
-def init_session():
-
-    defaults = [
-        "designer_inputs",
-        "designer_results",
-        "designer_best",
-        "designer_optimal",
-        "clear_trigger",
-        "run_trigger",
-    ]
-
-    for d in defaults:
-        if d not in st.session_state:
-            st.session_state[d] = None
-
-
-# ------------------------------------------------------------
 # MAIN RENDER FUNCTION
 # ------------------------------------------------------------
+
 def render(inv_model, fwd_p50, fwd_p10, fwd_p90, section_lookup, df_full):
 
-    init_session()
-
-    # =====================================================
-    # 1 — HANDLE TRIGGERS FIRST (NO RERUN INSIDE RENDER)
-    # =====================================================
-
-    # ---------- CLEAR ACTION ----------
-    if st.session_state.clear_trigger:
-        st.session_state.designer_inputs = {}
-        st.session_state.designer_results = None
-        st.session_state.designer_best = None
-        st.session_state.designer_optimal = None
-        st.session_state.clear_trigger = None
-        return  # exit render safely
-
-    # ---------- RUN ACTION ----------
-    if st.session_state.run_trigger:
-        data = st.session_state.run_trigger
-        st.session_state.run_trigger = None  # consume trigger
-
-        run_inverse(
-            *data,
-            inv_model, fwd_p50, fwd_p10, fwd_p90,
-            section_lookup, df_full
-        )
-        return  # exit render safely
-
-    # --------------------------------------------------------
-    # 2 — NORMAL PAGE RENDERING
-    # --------------------------------------------------------
     st.header("🏗 Designer Tool — 3-Stage Inverse Design")
 
-    # ---------- CLEAR BUTTON ----------
-    if st.button("🧹 Clear All"):
-        st.session_state.clear_trigger = True
-        return
-
     st.sidebar.subheader("🧮 Design Inputs")
+    wu_target = st.sidebar.number_input("Target wu (kN/m)", 5.0, 300.0, 30.0)
+    L = st.sidebar.number_input("Beam span L (mm)", 5000.0, 30000.0, 12000.0)
+    h0 = st.sidebar.number_input("Opening diameter h0 (mm)", 200.0, 800.0, 400.0)
+    s = st.sidebar.number_input("Centre spacing s (mm)", 300.0, 2000.0, 600.0)
+    fy = st.sidebar.number_input("Steel fy (MPa)", 200.0, 600.0, 355.0)
+    N0 = st.sidebar.number_input("Number of openings N0", 1, 50, 10)
 
-    # Load previous values if exist
-    inputs = st.session_state.designer_inputs or {}
-
-    wu_target = st.sidebar.number_input(
-        "Target wu (kN/m)", 5.0, 300.0, inputs.get("wu_target", 30.0)
-    )
-    L = st.sidebar.number_input(
-        "Beam span L (mm)", 5000.0, 30000.0, inputs.get("L", 12000.0)
-    )
-    h0 = st.sidebar.number_input(
-        "Opening diameter h0 (mm)", 200.0, 800.0, inputs.get("h0", 400.0)
-    )
-    s = st.sidebar.number_input(
-        "Centre spacing s (mm)", 300.0, 2000.0, inputs.get("s", 600.0)
-    )
-    fy = st.sidebar.number_input(
-        "Steel fy (MPa)", 200.0, 600.0, inputs.get("fy", 355.0)
-    )
-    N0 = st.sidebar.number_input(
-        "Number of openings N0", 1, 50, inputs.get("N0", 10)
-    )
-
-    # Save
-    st.session_state.designer_inputs = {
-        "wu_target": wu_target,
-        "L": L, "h0": h0,
-        "s": s, "fy": fy, "N0": N0
-    }
-
-    # Derived
+    # Derived geometric values
     s0 = s - h0
     se = (L - (h0 * N0 + s0 * (N0 - 1))) / 2
 
     st.sidebar.write(f"Computed s0 = {s0:.1f} mm")
     st.sidebar.write(f"Computed se = {se:.1f} mm")
 
+    # Geometric feasibility
     if se < 0:
         st.error("❌ Selected N0 is NOT feasible for this span. Reduce N0.")
         return
 
-    # ---------- RUN BUTTON ----------
     if st.button("Run Inverse Design", type="primary"):
-
-        # Store trigger with parameters
-        st.session_state.run_trigger = [
-            wu_target, L, h0, s, s0, se, fy
-        ]
-        return
-
-    # ============================================================
-    # SHOW RESULTS (only after run)
-    # ============================================================
-    if st.session_state.designer_results is not None:
-
-        st.subheader("🎯 Exact Strength-Matching Section")
-        st.write(st.session_state.designer_best.to_frame().T)
-
-        st.subheader("🏅 Optimal Balanced Section")
-        st.write(st.session_state.designer_optimal.to_frame().T)
-
-        st.subheader("📊 Full Ranking Table")
-        st.dataframe(st.session_state.designer_results)
-
-        df_res = st.session_state.designer_results
-
-        st.download_button("Download CSV",
-            df_res.to_csv(index=False),
-            file_name="inverse_design_results.csv"
-        )
-
-        buf = io.BytesIO()
-        df_res.to_excel(buf, index=False)
-        st.download_button(
-            "Download Excel",
-            buf.getvalue(),
-            file_name="inverse_design_results.xlsx"
-        )
-
-        st.download_button(
-            "Download JSON",
-            df_res.to_json(orient="records", indent=2),
-            file_name="inverse_design_results.json"
-        )
-
-        st.download_button(
-            "Download TXT",
-            df_res.to_string(),
-            file_name="inverse_design_results.txt"
+        run_inverse(
+            wu_target, L, h0, s, s0, se, fy,
+            inv_model, fwd_p50, fwd_p10, fwd_p90,
+            section_lookup, df_full
         )
 
 
 # ------------------------------------------------------------
-# 3 — CORE PIPELINE (NO RERUN, NO UI OUTPUT)
+# CORE PIPELINE
 # ------------------------------------------------------------
+
 def run_inverse(wu_target, L, h0, s, s0, se, fy,
                 inv_model, fwd_p50, fwd_p10, fwd_p90,
                 section_lookup, df_full):
 
+    st.subheader("🔍 Phase 1 — Inverse Model Prediction")
+
+    # Compute full forward space for feasibility
+    all_wu_p50 = []
+    for _, row in section_lookup.iterrows():
+        H = row.H; bf = row.bf; tw = row.tw; tf = row.tf
+        Xtest = np.array([[H, bf, tw, tf, L, h0, s, s0, se, fy]])
+        val = fwd_p50.predict(Xtest)[0]
+        all_wu_p50.append(val)
+
+    wu_min = min(all_wu_p50)
+    wu_max = max(all_wu_p50)
+
+    # Check physical feasibility
+    if wu_target < wu_min or wu_target > wu_max:
+
+        st.error("❌ The requested target strength is NOT physically achievable with this geometry and material configuration.")
+
+        st.markdown("### 📉 Feasibility Summary")
+        st.write(f"**Target wu:** {wu_target:.2f} kN/m")
+        st.write(f"**Minimum achievable wu:** {wu_min:.2f} kN/m")
+        st.write(f"**Maximum achievable wu:** {wu_max:.2f} kN/m")
+
+        # Engineering guidance for outside range
+        if wu_target > wu_max:
+            st.markdown("### 🔧 Why is this design infeasible?")
+            st.write("The beam is **too weak** to reach such a high wu.")
+
+            st.markdown("### 🔧 Engineering Recommendations")
+            st.write("""
+            To **increase** strength, consider:
+            - Decrease hole diameter **h0**
+            - Reduce number of openings **N0**
+            - Increase plate thickness (tf, tw)
+            - Increase steel grade **fy**
+            - Reduce span **L**
+            """)
+        else:
+            st.markdown("### 🔧 Why is this design infeasible?")
+            st.write("The beam is **too strong** for such a small target wu.")
+
+            st.markdown("### 🔧 Engineering Recommendations")
+            st.write("""
+            To **reduce** strength:
+            - Increase hole diameter **h0**
+            - Increase spacing **s**
+            - Increase number of openings **N0**
+            - Reduce steel grade **fy**
+            - Increase span **L**
+            """)
+        return
+
+    # PHASE 1: Inverse model prediction
     proba = inv_model.predict_proba([[wu_target, L, h0, s, fy]])[0]
     top_sections = proba.argsort()[-10:][::-1]
 
@@ -189,13 +124,14 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
     quantile_cross_issue = False
 
     for sec in top_sections:
-        row = section_lookup[section_lookup.SectionID == sec].iloc[0]
 
-        H, bf = int(row.H), int(row.bf)
-        tw, tf = float(row.tw), float(row.tf)
+        row = section_lookup[section_lookup.SectionID == sec].iloc[0]
+        H = int(row.H)
+        bf = int(row.bf)
+        tw = float(row.tw)
+        tf = float(row.tf)
 
         Xtest = np.array([[H, bf, tw, tf, L, h0, s, s0, se, fy]])
-
         Pred_wu = fwd_p50.predict(Xtest)[0]
         LB_wu = fwd_p10.predict(Xtest)[0]
         UB_wu = fwd_p90.predict(Xtest)[0]
@@ -205,11 +141,20 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
 
         error_ratio = abs(Pred_wu - wu_target) / wu_target
 
+        # Applicability from dataset
         app = df_full[df_full.SectionID == sec].iloc[0]
+        SCI_app = app["SCI_applicable"]
+        ENM_app = app["ENM_applicable"]
+        AISC_app = app["AISC_applicable"]
 
-        SCI = check_SCI(H, bf, tw, tf, h0, s0, se) if app["SCI_applicable"] == 1 else -1
-        ENM = check_ENM(H, bf, tw, tf, h0, s0) if app["ENM_applicable"] == 1 else -1
-        AISC = check_AISC(H, bf, tw, tf, h0, s) if app["AISC_applicable"] == 1 else -1
+        SCI = ENM = AISC = -1
+
+        if SCI_app == 1:
+            SCI = check_SCI(H, bf, tw, tf, h0, s0, se)
+        if ENM_app == 1:
+            ENM = check_ENM(H, bf, tw, tf, h0, s0)
+        if AISC_app == 1:
+            AISC = check_AISC(H, bf, tw, tf, h0, s)
 
         fm_series = df_full[df_full.SectionID == sec]["Failure_mode"]
         fm = fm_series.mode()[0] if not fm_series.mode().empty else "Unknown"
@@ -240,6 +185,62 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
 
     df_res = pd.DataFrame(results).sort_values("Score").reset_index(drop=True)
 
-    st.session_state.designer_results = df_res
-    st.session_state.designer_best = df_res.sort_values("AbsErr").iloc[0]
-    st.session_state.designer_optimal = df_res.iloc[0]
+    # Phase 1.5 — Achievability inside feasible range but no good match
+    best_wu = df_res.iloc[0]["Predicted_wu"]
+    err = abs(best_wu - wu_target)
+
+    tolerance = max(0.15 * wu_target, 5)
+
+    if err > tolerance:
+        st.error("❗ No available section can reach your target strength for the selected geometry.")
+
+        st.markdown("### 📉 Achievability Check")
+        st.write(f"**Target wu:** {wu_target:.2f} kN/m")
+        st.write(f"**Closest achievable wu:** {best_wu:.2f} kN/m")
+        st.write(f"**Difference:** {err:.2f} kN/m")
+
+        if best_wu < wu_target:
+            st.markdown("### 🔧 Engineering Guidance — Increase Strength")
+            st.write("""
+            To **increase** strength:
+            - Decrease hole diameter **h0**
+            - Reduce number of openings **N0**
+            - Increase plate thickness (tf, tw)
+            - Increase steel grade **fy**
+            - Reduce span **L**
+            """)
+        else:
+            st.markdown("### 🔧 Engineering Guidance — Reduce Strength")
+            st.write("""
+            To **reduce** strength:
+            - Increase hole diameter **h0**
+            - Increase spacing **s**
+            - Increase number of openings **N0**
+            - Reduce steel grade **fy**
+            - Increase span **L**
+            """)
+        return
+
+    # One-time quantile warning
+    if quantile_cross_issue:
+        st.info("ℹ️ In some cases, the upper bound (p90) is lower than the median. "
+                "This is normal in quantile regression.")
+
+    # Exact strength-matching section
+    exact_match = df_res.sort_values("AbsErr").iloc[0]
+    st.subheader("🎯 Exact Strength-Matching Section")
+    st.write(exact_match.to_frame().T)
+
+    # Optimal section
+    st.subheader("🏅 Optimal Balanced Section (Lowest Score)")
+    st.write(df_res.head(1))
+
+    # Full ranking table
+    st.subheader("📊 Full Ranking Table")
+    st.dataframe(df_res)
+
+    st.download_button(
+        "Download Results as CSV",
+        df_res.to_csv(index=False),
+        file_name="inverse_design_results.csv"
+    )
