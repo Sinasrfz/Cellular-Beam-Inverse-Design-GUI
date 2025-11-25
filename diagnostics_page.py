@@ -148,7 +148,7 @@ def render():
     """)
 
     # User inputs
-    L_u  = st.number_input("L (mm)", 2000.0, 20000.0, 8000.0)
+    L_u  = st.number_input("L (mm)", 2000.0, 30000.0, 8000.0)
     h0_u = st.number_input("h0 (mm)", 150.0, 800.0, 350.0)
     s_u  = st.number_input("s (mm)", 200.0, 2000.0, 600.0)
     fy_u = st.number_input("fy (MPa)", 200.0, 600.0, 355.0)
@@ -203,4 +203,5 @@ def render():
     • Mean NN distance = {np.mean(dvals):.3f}  
     • 95% NN distance = {np.percentile(dvals,95):.3f}  
     """)
+
 
