@@ -143,8 +143,10 @@ def render():
     st.subheader("🗺 Global Validity Map — Training Domain Coverage")
 
     st.write("""
-    This tool shows whether your chosen design point is **inside** the 
-    dataset domain (safe for prediction) or **outside** (extrapolation).
+    This tool classifies your input into:
+    - 🟩 **Safe** (inside dataset)
+    - 🟨 **Caution** (within ±10% of dataset limits)
+    - 🟥 **Outside** (extrapolation — surrogate unreliable)
     """)
 
     # User inputs
@@ -154,41 +156,54 @@ def render():
     fy_u = st.number_input("fy (MPa)", 200.0, 600.0, 355.0)
     wu_u = st.number_input("Target wu (kN/m)", 5.0, 300.0, 40.0)
 
-    # Extract dataset ranges
-    rL  = df_full["L"].min(), df_full["L"].max()
-    r0  = df_full["h0"].min(), df_full["h0"].max()
-    rs  = df_full["s"].min(), df_full["s"].max()
-    rfy = df_full["fy"].min(), df_full["fy"].max()
-    rwu = df_full["wu_FEA"].min(), df_full["wu_FEA"].max()
+    # Dataset ranges (convert to float)
+    rL  = (float(df_full["L"].min()),  float(df_full["L"].max()))
+    r0  = (float(df_full["h0"].min()), float(df_full["h0"].max()))
+    rs  = (float(df_full["s"].min()),  float(df_full["s"].max()))
+    rfy = (float(df_full["fy"].min()), float(df_full["fy"].max()))
+    rwu = (float(df_full["wu_FEA"].min()), float(df_full["wu_FEA"].max()))
 
-    # Check each parameter
-    def check_range(v, r):
-        return (r[0] <= v <= r[1])
+    # Margin for yellow zone (±10%)
+    def margin(r):
+        low, high = r
+        span = high - low
+        return (low - 0.10*span, high + 0.10*span)
 
-    safe_L  = check_range(L_u, rL)
-    safe_0  = check_range(h0_u, r0)
-    safe_s  = check_range(s_u, rs)
-    safe_fy = check_range(fy_u, rfy)
-    safe_wu = check_range(wu_u, rwu)
+    def classify(v, r):
+        low, high = r
+        mlow, mhigh = margin(r)
 
+        if low <= v <= high:
+            return "🟩 Safe"
+        elif mlow <= v <= mhigh:
+            return "🟨 Caution"
+        else:
+            return "🟥 Outside"
+
+    # Classification
     st.markdown("### Validity Status")
 
-    def flag(ok):  
-        return "🟩 **Safe**" if ok else "🟥 **Outside dataset**"
+    st.write(f"L  → {classify(L_u, rL)}  (dataset: {rL})")
+    st.write(f"h0 → {classify(h0_u, r0)}  (dataset: {r0})")
+    st.write(f"s  → {classify(s_u, rs)}  (dataset: {rs})")
+    st.write(f"fy → {classify(fy_u, rfy)} (dataset: {rfy})")
+    st.write(f"wu → {classify(wu_u, rwu)} (dataset: {rwu})")
 
-    st.write(f"L  → {flag(safe_L)}  (dataset: {rL})")
-    st.write(f"h0 → {flag(safe_0)}  (dataset: {r0})")
-    st.write(f"s  → {flag(safe_s)}  (dataset: {rs})")
-    st.write(f"fy → {flag(safe_fy)} (dataset: {rfy})")
-    st.write(f"wu → {flag(safe_wu)} (dataset: {rwu})")
+    # Global message
+    statuses = [
+        classify(L_u, rL),
+        classify(h0_u, r0),
+        classify(s_u, rs),
+        classify(fy_u, rfy),
+        classify(wu_u, rwu),
+    ]
 
-    if all([safe_L, safe_0, safe_s, safe_fy, safe_wu]):
-        st.success("✔ Your design lies fully inside the training domain.")
+    if all("Safe" in s for s in statuses):
+        st.success("✔ Fully inside training domain. Surrogate highly reliable.")
+    elif any("Outside" in s for s in statuses):
+        st.error("❌ Some values are OUTSIDE dataset. Predictions unreliable.")
     else:
-        st.error("❌ Warning: Some inputs are **outside the training dataset**. "
-                 "Predictions may be unreliable.")
-
-    st.markdown("---")
+        st.warning("⚠ Some inputs are near dataset limits. Use caution.")
 
     # ============================================================
     # SECTION 6 — VALIDATION REPORT
@@ -203,5 +218,6 @@ def render():
     • Mean NN distance = {np.mean(dvals):.3f}  
     • 95% NN distance = {np.percentile(dvals,95):.3f}  
     """)
+
 
 
