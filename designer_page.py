@@ -36,11 +36,13 @@ def render(inv_model, fwd_p50, fwd_p10, fwd_p90, section_lookup, df_full):
     N0 = st.sidebar.number_input("Number of openings N0", 1, 50, 10)
 
     # derived geometry
+        # derived geometry
     s0 = s - h0
-    se = (L - (h0 * N0 + s0 * (N0 - 1))) ) / 2
+    se = (L - (h0 * N0 + s0 * (N0 - 1))) / 2
 
     st.sidebar.write(f"Computed s0 = {s0:.1f} mm")
     st.sidebar.write(f"Computed se = {se:.1f} mm")
+
 
     if st.button("Run Inverse Design", type="primary"):
         run_inverse(
@@ -334,3 +336,4 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         df_res_display.to_csv(index=False),
         file_name="inverse_design_results.csv"
     )
+
