@@ -335,32 +335,6 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         "AISC": emoji_code(best["AISC"]),
     })
 
-
-    # ============================================================
-    # GEOMETRY PLOT
-    # ============================================================
-
-    st.markdown("### 📐 Recommended Geometry")
-
-    fig, ax = plt.subplots(figsize=(6, 4))
-
-    H = best["H"]
-    bf = best["bf"]
-    tw = best["tw"]
-    tf = best["tf"]
-
-    ax.add_patch(plt.Rectangle((-bf/2, H/2 - tf), bf, tf, color="gray"))
-    ax.add_patch(plt.Rectangle((-bf/2, -H/2), bf, tf, color="gray"))
-    ax.add_patch(plt.Rectangle((-tw/2, -H/2), tw, H, color="lightgray"))
-
-    ax.set_xlim(-bf, bf)
-    ax.set_ylim(-H/1.2, H/1.2)
-    ax.set_aspect("equal")
-    ax.axis("off")
-
-    st.pyplot(fig)
-
-
     # ============================================================
     # EMOJI TABLE OUTPUT
     # ============================================================
@@ -381,3 +355,4 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         df_res_display.to_csv(index=False),
         file_name="inverse_design_results.csv"
     )
+
