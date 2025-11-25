@@ -315,26 +315,6 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
     else:
         st.error(f"❌ Weak match ({diff_percent:+.2f}%).")
 
-
-    # ============================================================
-    # CODE CHECK SUMMARY (EMOJI)
-    # ============================================================
-
-    def emoji_code(val):
-        if val == -1:
-            return "⚪ N/A"
-        elif val == 1:
-            return "🟩 PASS"
-        else:
-            return "🟥 FAIL"
-
-    st.markdown("### 📘 Code Check Summary")
-    st.write({
-        "SCI":  emoji_code(best["SCI"]),
-        "ENM":  emoji_code(best["ENM"]),
-        "AISC": emoji_code(best["AISC"]),
-    })
-
     # ============================================================
     # EMOJI TABLE OUTPUT
     # ============================================================
@@ -355,4 +335,5 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         df_res_display.to_csv(index=False),
         file_name="inverse_design_results.csv"
     )
+
 
