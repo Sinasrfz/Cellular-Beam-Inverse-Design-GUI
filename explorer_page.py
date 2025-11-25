@@ -28,10 +28,35 @@ def render(df_full):
     # ============================================================
     # 1 — Dataset Preview
     # ============================================================
-    st.subheader("📄 1. Dataset Preview")
-    st.dataframe(df_full.head(30))
+    st.subheader("📄 1. Dataset Preview (Interactive)")
+
+    st.write("Explore, filter, and inspect the FEA dataset.")
+
+    # Column selector
+    all_cols = df_full.columns.tolist()
+    selected_cols = st.multiselect(
+        "Select columns to display:",
+        options=all_cols,
+        default=all_cols
+    )
+
+    # Row filtering
+    st.markdown("#### 🔍 Row Filter")
+    filter_text = st.text_input("Type any value to filter rows (substring match):", "")
+
+    if filter_text.strip() != "":
+        filtered_df = df_full[df_full.apply(
+            lambda row: row.astype(str).str.contains(filter_text, case=False).any(),
+            axis=1
+        )]
+    else:
+        filtered_df = df_full
+
+    # Show result
+    st.dataframe(filtered_df[selected_cols].reset_index(drop=True))
 
     st.markdown("---")
+
 
     # ============================================================
     # 2 — Summary Statistics
@@ -181,3 +206,4 @@ def render(df_full):
     st.markdown("---")
 
     st.success("✔ Dataset Explorer Loaded Successfully")
+
