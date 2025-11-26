@@ -133,14 +133,37 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         error_ratio = abs(Pred_wu - wu_target) / wu_target
 
         # ------------------------------------------------------------
-        # 🔵 ONLY THIS PART IS MODIFIED
+        # 🔵 UPDATED BLOCK — USE DATASET APPLICABILITY & CAPACITY
         # ------------------------------------------------------------
         app = df_full[df_full.SectionID == sec].iloc[0]
 
-        # use dataset PASS/FAIL values directly (no simplified SCI checks)
-        SCI = app["SCI_applicable"]
-        ENM = app["ENM_applicable"]
-        AISC = app["AISC_applicable"]
+        def to_binary(x):
+            if isinstance(x, str):
+                v = x.strip().lower()
+                if v in ("yes", "y", "1", "true"):
+                    return 1
+                if v in ("no", "n", "0", "false"):
+                    return 0
+            try:
+                return int(x)
+            except:
+                return -1
+
+        SCI_app  = to_binary(app["SCI_applicable"])
+        ENM_app  = to_binary(app["ENM_applicable"])
+        AISC_app = to_binary(app["AISC_applicable"])
+
+        SCI = ENM = AISC = -1
+        wu_demand = Pred_wu
+
+        if SCI_app == 1 and "wSCI" in app.index:
+            SCI = 1 if wu_demand <= app["wSCI"] else 0
+        if ENM_app == 1 and "wENM" in app.index:
+            ENM = 1 if wu_demand <= app["wENM"] else 0
+        if AISC_app == 1 and "wAISC" in app.index:
+            AISC = 1 if wu_demand <= app["wAISC"] else 0
+
+        # ------------------------------------------------------------
 
         fm_series = df_full[df_full.SectionID == sec]["Failure_mode"]
         fm = fm_series.mode()[0] if not fm_series.mode().empty else "Unknown"
@@ -224,4 +247,3 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         df_res.to_csv(index=False),
         file_name="inverse_design_results.csv"
     )
-
