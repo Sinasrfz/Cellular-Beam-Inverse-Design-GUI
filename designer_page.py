@@ -36,14 +36,12 @@ def render(inv_model, fwd_p50, fwd_p10, fwd_p90, section_lookup, df_full):
     fy = st.sidebar.number_input("Steel fy (MPa)", 200.0, 600.0, 355.0)
     N0 = st.sidebar.number_input("Number of openings N0", 1, 50, 10)
 
-    # Derived geometric values
     s0 = s - h0
     se = (L - (h0 * N0 + s0 * (N0 - 1))) / 2
 
     st.sidebar.write(f"Computed s0 = {s0:.1f} mm")
     st.sidebar.write(f"Computed se = {se:.1f} mm")
 
-    # Geometric feasibility
     if se < 0:
         st.error("❌ Selected N0 is NOT feasible for this span. Reduce N0.")
         return
@@ -66,7 +64,6 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
 
     st.subheader("🔍 Phase 1 — Inverse Model Prediction")
 
-    # Compute full forward space for feasibility
     all_wu_p50 = []
     for _, row in section_lookup.iterrows():
         H = row.H; bf = row.bf; tw = row.tw; tf = row.tf
@@ -77,7 +74,6 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
     wu_min = min(all_wu_p50)
     wu_max = max(all_wu_p50)
 
-    # Check physical feasibility
     if wu_target < wu_min or wu_target > wu_max:
 
         st.error("❌ The requested target strength is NOT physically achievable with this geometry and material configuration.")
@@ -87,7 +83,6 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         st.write(f"**Minimum achievable wu:** {wu_min:.2f} kN/m")
         st.write(f"**Maximum achievable wu:** {wu_max:.2f} kN/m")
 
-        # Engineering guidance for outside range
         if wu_target > wu_max:
             st.markdown("### 🔧 Why is this design infeasible?")
             st.write("The beam is **too weak** to reach such a high wu.")
@@ -116,7 +111,6 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
             """)
         return
 
-    # PHASE 1: Inverse model prediction
     proba = inv_model.predict_proba([[wu_target, L, h0, s, fy]])[0]
     top_sections = proba.argsort()[-10:][::-1]
 
@@ -141,7 +135,6 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
 
         error_ratio = abs(Pred_wu - wu_target) / wu_target
 
-        # Applicability from dataset
         app = df_full[df_full.SectionID == sec].iloc[0]
         SCI_app = app["SCI_applicable"]
         ENM_app = app["ENM_applicable"]
@@ -185,10 +178,8 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
 
     df_res = pd.DataFrame(results).sort_values("Score").reset_index(drop=True)
 
-    # Phase 1.5 — Achievability inside feasible range but no good match
     best_wu = df_res.iloc[0]["Predicted_wu"]
     err = abs(best_wu - wu_target)
-
     tolerance = max(0.15 * wu_target, 5)
 
     if err > tolerance:
@@ -221,21 +212,17 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
             """)
         return
 
-    # One-time quantile warning
     if quantile_cross_issue:
-        st.info("ℹ️ In some cases, the upper bound (p90) is lower than the median. "
+        st.info("ℹ️ In some cases, the upper bound_wu is lower than the predicted_wu. "
                 "This is normal in quantile regression.")
 
-    # Exact strength-matching section
     exact_match = df_res.sort_values("AbsErr").iloc[0]
     st.subheader("🎯 Exact Strength-Matching Section")
     st.write(exact_match.to_frame().T)
 
-    # Optimal section
     st.subheader("🏅 Optimal Balanced Section (Lowest Score)")
     st.write(df_res.head(1))
 
-    # Full ranking table
     st.subheader("📊 Full Ranking Table")
     st.dataframe(df_res)
 
