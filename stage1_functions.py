@@ -1,5 +1,5 @@
 # ============================================================
-# stage1_functions.py — Helper Functions (Final Updated Version)
+# stage1_functions.py — Helper Functions (Final ML + Emoji Version)
 # ============================================================
 
 import numpy as np
@@ -32,7 +32,7 @@ def check_AISC(H, bf, tw, tf, h0, s):
 # ------------------------------------------------------------
 
 def compute_weight(H, bf, tw, tf, L, density=7850/1e9):
-    """Compute steel weight in kg/m → kg (mm units)."""
+    """Compute steel weight in kg in mm-unit system."""
     A = 2*(bf*tf) + tw*(H - 2*tf)
     return A * L * density
 
@@ -44,25 +44,21 @@ def compute_weight(H, bf, tw, tf, L, density=7850/1e9):
 def multiobjective_score(wu_target, wu_pred, weight,
                          sci, enm, aisc, failure_mode):
     """
-    Your original scoring logic is preserved *exactly* except:
+    ✔ If sci/enm/aisc = -1 (N/A), it contributes *zero penalty*.
+    ✔ If sci/enm/aisc = 0  (Fail), it adds penalty +1.
+    ✔ If sci/enm/aisc = 1  (Pass), it adds 0 penalty.
 
-    ✔ If sci/enm/aisc = -1 (NOT APPLICABLE), it should NOT add penalty.
-      So we treat:
-          -1 → contributes 0 penalty
-           1 → contributes 0 penalty
-           0 → contributes +1 penalty
-
-    This mirrors structural engineering logic.
+    Failure penalty & strength penalty remain unchanged.
     """
 
-    # Strength penalty (unchanged)
+    # Strength penalty
     strength_penalty = abs(wu_pred - wu_target) / max(wu_target, 1e-6)
 
-    # ---- NEW: N/A logic (no penalty for -1)
+    # Applicability penalty (N/A ignored)
     def code_pen(x):
-        if x == -1:   # N/A → ignore
+        if x == -1:  # N/A
             return 0
-        return 1 - x  # Fail → 1, Pass → 0
+        return 1 - x  # Fail=1, Pass=0
 
     code_penalty = code_pen(sci) + code_pen(enm) + code_pen(aisc)
 
@@ -73,7 +69,6 @@ def multiobjective_score(wu_target, wu_pred, weight,
     elif failure_mode in ["WPS", "VBT"]:
         failure_penalty = 1
 
-    # Final score
     return (
         2.0 * strength_penalty +
         1.5 * code_penalty +
@@ -83,16 +78,10 @@ def multiobjective_score(wu_target, wu_pred, weight,
 
 
 # ------------------------------------------------------------
-# 4) EMOJI FOR RULE-BASED CHECKS (unchanged)
+# 4) RULE-BASED EMOJI (kept for debugging only)
 # ------------------------------------------------------------
 
 def code_to_emoji(val):
-    """
-    Map rule-based integer outputs to emojis.
-    1  -> Pass ✔️
-    0  -> Fail ❌
-    -1 -> Not Applicable ➖
-    """
     if val == 1:
         return "✔️"
     if val == 0:
@@ -101,16 +90,10 @@ def code_to_emoji(val):
 
 
 # ------------------------------------------------------------
-# 5) NEW — LABEL FOR ML APPLICABILITY (N/A / Pass / Fail)
+# 5) ML APPLICABILITY LABELS (text) — for internal use
 # ------------------------------------------------------------
 
 def applicability_to_label(val):
-    """
-    Convert ML applicability value for GUI display:
-        -1  → "N/A"
-         1  → "Pass"
-         0  → "Fail"
-    """
     if val == -1:
         return "N/A"
     elif val == 1:
@@ -121,15 +104,20 @@ def applicability_to_label(val):
 
 
 # ------------------------------------------------------------
-# 6) NEW — ML EMOJI MAPPING (optional)
+# 6) ML APPLICABILITY — FINAL EMOJI OUTPUT (USED IN GUI)
 # ------------------------------------------------------------
 
-def ml_to_emoji(val):
+def applicability_to_emoji(val):
     """
-    Simple emoji converter for ML classifiers.
+    Emoji-based ML applicability (final output for GUI):
+        -1 -> ⬜ N/A
+         1 -> 🟩 Pass
+         0 -> 🟥 Fail
     """
     if val == -1:
-        return "➖"
-    if val == 1:
-        return "✔️"
-    return "❌"
+        return "⬜ N/A"
+    elif val == 1:
+        return "🟩 Pass"
+    elif val == 0:
+        return "🟥 Fail"
+    return "⬜ N/A"
