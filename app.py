@@ -7,7 +7,6 @@ import joblib
 import pandas as pd
 import requests
 import io
-import re   # ← needed for the mobile patch
 
 # ------------------------------------------------------------
 # STREAMLIT PAGE CONFIGURATION
@@ -110,9 +109,7 @@ try:
 
     st.success("✔ All models and data loaded successfully.")
 
-    # ------------------------------------------------------------
-    # IMPORTANT: STORE EVERYTHING FOR DIAGNOSTICS PAGE
-    # ------------------------------------------------------------
+    # Store for use in pages
     st.session_state["inv_model"] = inv_model
     st.session_state["fwd_p50"] = fwd_p50
     st.session_state["fwd_p10"] = fwd_p10
