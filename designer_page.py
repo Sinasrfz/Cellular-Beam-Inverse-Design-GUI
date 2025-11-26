@@ -210,7 +210,8 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         return
 
     if quantile_cross_issue:
-        st.info("ℹ Some quantiles crossed (p90 < p50).")
+        st.info("ℹ In some cases, the upper bound_wu is lower than the predicted value_wu. "
+                "This is normal in quantile regression.")
 
     st.subheader("🎯 Exact Strength-Matching Section")
     st.write(df_res.sort_values("AbsErr").head(1))
@@ -226,3 +227,4 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         df_res.to_csv(index=False),
         file_name="inverse_design_results.csv"
     )
+
