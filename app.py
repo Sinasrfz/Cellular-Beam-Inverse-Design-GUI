@@ -9,26 +9,6 @@ import requests
 import io
 import re   # ← needed for the mobile patch
 
-# ============================================================
-# MOBILE SAFARI HOTFIX — Prevent Markdown Regex Crash
-# ============================================================
-# Safari (and Chrome on iOS) crashes when Streamlit attempts to use
-# the GitHub-Flavored Markdown autolink regex.
-# This patch safely replaces the problematic regex with a simple one.
-
-try:
-    if hasattr(st.markdown, "__globals__"):
-        md_globals = st.markdown.__globals__
-        if "GFM_AUTOLINK_RE" in md_globals:
-            # Replace with a SAFE regex (no named groups)
-            md_globals["GFM_AUTOLINK_RE"] = re.compile(
-                r"(https?://[^\s]+)", re.IGNORECASE
-            )
-except Exception:
-    # If anything goes wrong, simply continue without breaking the app
-    pass
-
-
 # ------------------------------------------------------------
 # STREAMLIT PAGE CONFIGURATION
 # ------------------------------------------------------------
