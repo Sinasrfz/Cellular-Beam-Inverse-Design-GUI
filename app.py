@@ -43,6 +43,7 @@ INVERSE_MODEL_URL = (
 )
 
 def load_joblib_from_url(url):
+    """Download .joblib file from GitHub Releases."""
     try:
         response = requests.get(url)
         response.raise_for_status()
@@ -54,7 +55,7 @@ def load_joblib_from_url(url):
 
 
 # ============================================================
-# 2 — LOCAL FILE PATHS (stored in repo root)
+# 2 — LOCAL FILE PATHS (stored in GitHub repo root)
 # ============================================================
 
 FWD_P50        = "forward_p50.joblib"
@@ -62,6 +63,13 @@ FWD_P10        = "forward_p10.joblib"
 FWD_P90        = "forward_p90.joblib"
 SECTION_LOOKUP = "section_lookup.csv"
 DATA_FILE      = "21.xlsx"
+
+# New classifier model paths (ALSO LOCAL — same structure as forward models)
+SCI_CLF_FILE  = "SCI_clf.joblib"
+ENM_CLF_FILE  = "ENM_clf.joblib"
+ENA_CLF_FILE  = "ENA_clf.joblib"
+AISC_CLF_FILE = "AISC_clf.joblib"
+FM_CLF_FILE   = "FM_clf.joblib"
 
 
 # ============================================================
@@ -110,6 +118,19 @@ def load_full_data():
     return df
 
 
+# NEW — classifier loader (LOCAL — identical structure to forward models)
+
+@st.cache_resource
+def load_classifiers():
+    return (
+        joblib.load(SCI_CLF_FILE),
+        joblib.load(ENM_CLF_FILE),
+        joblib.load(ENA_CLF_FILE),
+        joblib.load(AISC_CLF_FILE),
+        joblib.load(FM_CLF_FILE)
+    )
+
+
 # ============================================================
 # 4 — INITIAL LOAD
 # ============================================================
@@ -120,19 +141,31 @@ try:
     section_lookup = load_lookup()
     df_full = load_full_data()
 
+    # Load NEW classifiers
+    sci_clf, enm_clf, ena_clf, aisc_clf, fm_clf = load_classifiers()
+
     if "SectionID" not in df_full.columns:
         st.error("❌ ERROR: Your dataset does NOT contain SectionID.")
         st.stop()
 
     st.success("✔ All models and data loaded successfully.")
 
-    # Store for designer & diagnostics pages
+    # ------------------------------------------------------------
+    # IMPORTANT: STORE EVERYTHING FOR DESIGNER + DIAGNOSTICS PAGE
+    # ------------------------------------------------------------
     st.session_state["inv_model"] = inv_model
     st.session_state["fwd_p50"] = fwd_p50
     st.session_state["fwd_p10"] = fwd_p10
     st.session_state["fwd_p90"] = fwd_p90
     st.session_state["section_lookup"] = section_lookup
     st.session_state["df_full"] = df_full
+
+    # NEW
+    st.session_state["sci_clf"] = sci_clf
+    st.session_state["enm_clf"] = enm_clf
+    st.session_state["ena_clf"] = ena_clf
+    st.session_state["aisc_clf"] = aisc_clf
+    st.session_state["fm_clf"] = fm_clf
 
 except Exception as e:
     st.error("❌ Failed to load required assets.")
