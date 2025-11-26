@@ -7,25 +7,20 @@ import pandas as pd
 
 
 # ------------------------------------------------------------
-# CODE CHECK FUNCTIONS
+# ⚠️ REMOVED: CODE CHECK FUNCTIONS
+# These are no longer used because the GUI now uses dataset
+# applicability values directly. Keeping them would cause
+# inconsistency, so they are intentionally removed.
 # ------------------------------------------------------------
 
-def check_SCI(H, bf, tw, tf, h0, s0, se):
-    h = H + tf
-    hT = (h - h0) / 2
-    return int(h0 <= 0.8 * h and hT >= tf + 30 and s0 >= 0.3 * h0 and se >= 0.5 * h0)
-
-def check_ENM(H, bf, tw, tf, h0, s0):
-    h = H + tf
-    hT = (h - h0) / 2
-    return int(h0 <= 0.8 * h and hT >= tf + 30 and s0 >= 0.1 * h0)
-
-def check_AISC(H, bf, tw, tf, h0, s):
-    return int(1.25 <= H / h0 <= 1.75 and 1.08 <= s / h0 <= 1.50)
+# def check_SCI(...):
+# def check_ENM(...):
+# def check_AISC(...):
+# (Removed intentionally — dataset values are used instead)
 
 
 # ------------------------------------------------------------
-# WEIGHT FUNCTION
+# WEIGHT FUNCTION  (unchanged)
 # ------------------------------------------------------------
 
 def compute_weight(H, bf, tw, tf, L, density=7850/1e9):
@@ -34,7 +29,7 @@ def compute_weight(H, bf, tw, tf, L, density=7850/1e9):
 
 
 # ------------------------------------------------------------
-# EMOJI CONVERSION
+# EMOJI CONVERSION (unchanged)
 # ------------------------------------------------------------
 
 def code_to_emoji(val):
@@ -48,7 +43,7 @@ def code_to_emoji(val):
 
 
 # ------------------------------------------------------------
-# MULTI-OBJECTIVE SCORE (Applicability-aware)
+# MULTI-OBJECTIVE SCORE (unchanged)
 # ------------------------------------------------------------
 
 def multiobjective_score(wu_target, wu_pred, weight, sci, enm, aisc, failure_mode):
