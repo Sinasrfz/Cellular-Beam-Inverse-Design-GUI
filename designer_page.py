@@ -8,9 +8,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from stage1_functions import (
-    check_SCI,
-    check_ENM,
-    check_AISC,
     compute_weight,
     multiobjective_score,
     code_to_emoji
@@ -227,3 +224,4 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         df_res.to_csv(index=False),
         file_name="inverse_design_results.csv"
     )
+
