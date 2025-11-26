@@ -89,7 +89,7 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
 
             st.markdown("### 🔧 Engineering Recommendations")
             st.write("""
-            To **increase** strength, consider:
+            To **increase** strength:
             - Decrease hole diameter **h0**
             - Reduce number of openings **N0**
             - Increase plate thickness (tf, tw)
@@ -135,19 +135,15 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
 
         error_ratio = abs(Pred_wu - wu_target) / wu_target
 
+        # ------------------------------------------------------------
+        # 🔵 ONLY THIS PART IS MODIFIED
+        # ------------------------------------------------------------
         app = df_full[df_full.SectionID == sec].iloc[0]
-        SCI_app = app["SCI_applicable"]
-        ENM_app = app["ENM_applicable"]
-        AISC_app = app["AISC_applicable"]
 
-        SCI = ENM = AISC = -1
-
-        if SCI_app == 1:
-            SCI = check_SCI(H, bf, tw, tf, h0, s0, se)
-        if ENM_app == 1:
-            ENM = check_ENM(H, bf, tw, tf, h0, s0)
-        if AISC_app == 1:
-            AISC = check_AISC(H, bf, tw, tf, h0, s)
+        # use dataset PASS/FAIL values directly (no simplified SCI checks)
+        SCI = app["SCI_applicable"]
+        ENM = app["ENM_applicable"]
+        AISC = app["AISC_applicable"]
 
         fm_series = df_full[df_full.SectionID == sec]["Failure_mode"]
         fm = fm_series.mode()[0] if not fm_series.mode().empty else "Unknown"
