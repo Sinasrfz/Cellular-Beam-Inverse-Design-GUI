@@ -1,5 +1,5 @@
 # ============================================================
-# designer_page.py — 3-Stage Inverse Design (Updated Version)
+# designer_page.py — 3-Stage Inverse Design (Final Updated Version)
 # ============================================================
 
 import streamlit as st
@@ -13,7 +13,8 @@ from stage1_functions import (
     check_AISC,
     compute_weight,
     multiobjective_score,
-    code_to_emoji
+    code_to_emoji,
+    applicability_to_label   # ➜ NEW helper for Pass / Fail / N/A
 )
 
 plt.rcParams["font.family"] = "Times New Roman"
@@ -77,7 +78,7 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
     wu_min = min(all_wu_p50)
     wu_max = max(all_wu_p50)
 
-    # Check physical feasibility
+    # Physical feasibility check
     if wu_target < wu_min or wu_target > wu_max:
 
         st.error("❌ The requested target strength is NOT physically achievable.")
@@ -114,14 +115,14 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
     results = []
     quantile_cross_issue = False
 
-    # Load classifiers
+    # Load ML classifiers
     sci_clf  = st.session_state["sci_clf"]
     enm_clf  = st.session_state["enm_clf"]
     ena_clf  = st.session_state["ena_clf"]
     aisc_clf = st.session_state["aisc_clf"]
     fm_clf   = st.session_state["fm_clf"]
 
-    df_feat = df_full  # contains Area and fyxArea
+    df_feat = df_full  # contains Area & fyxArea + applicability metadata
 
     for sec in top_sections:
 
@@ -131,6 +132,7 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         tw = float(row.tw)
         tf = float(row.tf)
 
+        # Forward predictions
         Xtest = np.array([[H, bf, tw, tf, L, h0, s, s0, se, fy]])
         Pred_wu = fwd_p50.predict(Xtest)[0]
         LB_wu = fwd_p10.predict(Xtest)[0]
@@ -139,19 +141,18 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         if UB_wu < Pred_wu:
             quantile_cross_issue = True
 
-        # RULE-BASED
+        # RULE-BASED checks
         SCI_rule = check_SCI(H, bf, tw, tf, h0, s0, se)
         ENM_rule = check_ENM(H, bf, tw, tf, h0, s0)
         AISC_rule = check_AISC(H, bf, tw, tf, h0, s)
 
-        # ML FEATURES
+        # Derived ML features
         L_H = L / H
         H_ho = H / h0
         s_h0 = s / h0
         tf_tw = tf / tw
         bf_H = bf / H
 
-        # FIXED: Safe column names
         area_row = df_feat[df_feat.SectionID == sec].iloc[0]
 
         Area_val = float(area_row["Area"])
@@ -164,19 +165,35 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
                                  L_H, H_ho, s_h0, tf_tw, bf_H,
                                  Area_val, FyArea_val]])
 
-        SCI_ML  = sci_clf.predict(ML_features)[0]
-        ENM_ML  = enm_clf.predict(ML_features)[0]
-        ENA_ML  = ena_clf.predict(ML_features)[0]
-        AISC_ML = aisc_clf.predict(ML_features)[0]
-        FM_ML   = fm_clf.predict(ML_features)[0]
+        # =============================
+        # NEW: 3-level ML applicability
+        # =============================
 
+        SCI_app = int(area_row["SCI_applicable"])
+        ENM_app = int(area_row["ENM_applicable"])
+        ENA_app = int(area_row["ENA_applicable"])
+        AISC_app = int(area_row["AISC_applicable"])
+
+        SCI_ML  = -1 if SCI_app  == 0 else sci_clf.predict(ML_features)[0]
+        ENM_ML  = -1 if ENM_app  == 0 else enm_clf.predict(ML_features)[0]
+        ENA_ML  = -1 if ENA_app  == 0 else ena_clf.predict(ML_features)[0]
+        AISC_ML = -1 if AISC_app == 0 else aisc_clf.predict(ML_features)[0]
+
+        # ML failure mode (always applicable)
+        FM_ML = fm_clf.predict(ML_features)[0]
+
+        # Weight
         weight = compute_weight(H, bf, tw, tf, L)
 
+        # =============================
+        # NEW scoring (ignores N/A)
+        # =============================
         score = multiobjective_score(
             wu_target, Pred_wu, weight,
             SCI_ML, ENM_ML, AISC_ML, FM_ML
         )
 
+        # Add results dictionary
         results.append({
             "SectionID": sec,
             "H (mm)": H,
@@ -186,19 +203,23 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
             "Predicted_wu": Pred_wu,
             "LowerBound_wu": LB_wu,
             "UpperBound_wu": UB_wu,
-            "SCI_ML": SCI_ML,
-            "ENM_ML": ENM_ML,
-            "ENA_ML": ENA_ML,
-            "AISC_ML": AISC_ML,
+
+            "SCI (ML)": applicability_to_label(SCI_ML),
+            "ENM (ML)": applicability_to_label(ENM_ML),
+            "ENA (ML)": applicability_to_label(ENA_ML),
+            "AISC (ML)": applicability_to_label(AISC_ML),
+
+            "SCI (Rule)": code_to_emoji(SCI_rule),
+            "ENM (Rule)": code_to_emoji(ENM_rule),
+            "AISC (Rule)": code_to_emoji(AISC_rule),
+
             "Failure_ML": FM_ML,
-            "SCI_rule": code_to_emoji(SCI_rule),
-            "ENM_rule": code_to_emoji(ENM_rule),
-            "AISC_rule": code_to_emoji(AISC_rule),
             "Weight (kg)": weight,
             "Score": score,
             "AbsErr": abs(Pred_wu - wu_target)
         })
 
+    # Convert results
     df_res = pd.DataFrame(results).sort_values("Score").reset_index(drop=True)
 
     best_wu = df_res.iloc[0]["Predicted_wu"]
@@ -206,12 +227,11 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
     tolerance = max(0.15 * wu_target, 5)
 
     if err > tolerance:
-        st.error("❗ No section can reach the target strength.")
+        st.error("❗ No section can reach the target strength within tolerance.")
         return
 
     if quantile_cross_issue:
-        st.info("ℹ In some cases, the upper bound_wu is lower than the predicted value_wu. "
-                "This is normal in quantile regression.")
+        st.info("ℹ Some quantile values crossed (p90 < p50).")
 
     st.subheader("🎯 Exact Strength-Matching Section")
     st.write(df_res.sort_values("AbsErr").head(1))
@@ -227,4 +247,3 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         df_res.to_csv(index=False),
         file_name="inverse_design_results.csv"
     )
-
