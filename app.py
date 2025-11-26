@@ -55,7 +55,7 @@ def load_joblib_from_url(url):
 
 
 # ============================================================
-# 2 — LOCAL FILE PATHS (MODELS STORED IN REPO)
+# 2 — LOCAL FILE PATHS (stored in GitHub repo root)
 # ============================================================
 
 FWD_P50        = "forward_p50.joblib"
@@ -64,7 +64,7 @@ FWD_P90        = "forward_p90.joblib"
 SECTION_LOOKUP = "section_lookup.csv"
 DATA_FILE      = "21.xlsx"
 
-# New classifier models
+# New classifier model paths (ALSO LOCAL — same structure as forward models)
 SCI_CLF_FILE  = "SCI_clf.joblib"
 ENM_CLF_FILE  = "ENM_clf.joblib"
 ENA_CLF_FILE  = "ENA_clf.joblib"
@@ -118,24 +118,21 @@ def load_full_data():
     return df
 
 
-# NEW — Load applicability + failure mode classifiers
+# NEW — classifier loader (LOCAL — identical structure to forward models)
+
 @st.cache_resource
 def load_classifiers():
-    try:
-        sci_clf  = joblib.load(SCI_CLF_FILE)
-        enm_clf  = joblib.load(ENM_CLF_FILE)
-        ena_clf  = joblib.load(ENA_CLF_FILE)
-        aisc_clf = joblib.load(AISC_CLF_FILE)
-        fm_clf   = joblib.load(FM_CLF_FILE)
-        return sci_clf, enm_clf, ena_clf, aisc_clf, fm_clf
-    except Exception as e:
-        st.error("❌ Failed to load classifier models.")
-        st.code(str(e))
-        raise e
+    return (
+        joblib.load(SCI_CLF_FILE),
+        joblib.load(ENM_CLF_FILE),
+        joblib.load(ENA_CLF_FILE),
+        joblib.load(AISC_CLF_FILE),
+        joblib.load(FM_CLF_FILE)
+    )
 
 
 # ============================================================
-# 4 — INITIAL LOAD (ALL MODELS)
+# 4 — INITIAL LOAD
 # ============================================================
 
 try:
@@ -144,11 +141,18 @@ try:
     section_lookup = load_lookup()
     df_full = load_full_data()
 
+    # Load NEW classifiers
     sci_clf, enm_clf, ena_clf, aisc_clf, fm_clf = load_classifiers()
+
+    if "SectionID" not in df_full.columns:
+        st.error("❌ ERROR: Your dataset does NOT contain SectionID.")
+        st.stop()
 
     st.success("✔ All models and data loaded successfully.")
 
-    # Store everything in session_state
+    # ------------------------------------------------------------
+    # IMPORTANT: STORE EVERYTHING FOR DESIGNER + DIAGNOSTICS PAGE
+    # ------------------------------------------------------------
     st.session_state["inv_model"] = inv_model
     st.session_state["fwd_p50"] = fwd_p50
     st.session_state["fwd_p10"] = fwd_p10
@@ -156,7 +160,7 @@ try:
     st.session_state["section_lookup"] = section_lookup
     st.session_state["df_full"] = df_full
 
-    # New classifier models
+    # NEW
     st.session_state["sci_clf"] = sci_clf
     st.session_state["enm_clf"] = enm_clf
     st.session_state["ena_clf"] = ena_clf
