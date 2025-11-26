@@ -1,5 +1,5 @@
 # ============================================================
-# designer_page.py — 3-Stage Inverse Design (Final ML-Only Version)
+# designer_page.py — 3-Stage Inverse Design (Updated Version)
 # ============================================================
 
 import streamlit as st
@@ -13,7 +13,7 @@ from stage1_functions import (
     check_AISC,
     compute_weight,
     multiobjective_score,
-    applicability_to_emoji,   # ← NEW (emoji-based ML applicability)
+    code_to_emoji
 )
 
 plt.rcParams["font.family"] = "Times New Roman"
@@ -66,7 +66,7 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
 
     st.subheader("🔍 Phase 1 — Inverse Model Prediction")
 
-    # Compute feasible strength limits
+    # Compute full forward space for feasibility
     all_wu_p50 = []
     for _, row in section_lookup.iterrows():
         H = row.H; bf = row.bf; tw = row.tw; tf = row.tf
@@ -77,48 +77,51 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
     wu_min = min(all_wu_p50)
     wu_max = max(all_wu_p50)
 
+    # Check physical feasibility
     if wu_target < wu_min or wu_target > wu_max:
-        st.error("❌ The requested target strength is NOT physically achievable.")
+
+        st.error("❌ The requested target strength is NOT physically achievable with this geometry and material configuration.")
+
         st.markdown("### 📉 Feasibility Summary")
         st.write(f"**Target wu:** {wu_target:.2f} kN/m")
         st.write(f"**Minimum achievable wu:** {wu_min:.2f} kN/m")
         st.write(f"**Maximum achievable wu:** {wu_max:.2f} kN/m")
 
+        # Engineering guidance for outside range
         if wu_target > wu_max:
-            st.markdown("### 🔧 Increase Strength")
+            st.markdown("### 🔧 Why is this design infeasible?")
+            st.write("The beam is **too weak** to reach such a high wu.")
+
+            st.markdown("### 🔧 Engineering Recommendations")
             st.write("""
-            - Reduce hole diameter h0  
-            - Reduce number of openings N0  
-            - Increase plate thickness  
-            - Increase fy  
-            - Reduce span L  
+            To **increase** strength, consider:
+            - Decrease hole diameter **h0**
+            - Reduce number of openings **N0**
+            - Increase plate thickness (tf, tw)
+            - Increase steel grade **fy**
+            - Reduce span **L**
             """)
         else:
-            st.markdown("### 🔧 Reduce Strength")
+            st.markdown("### 🔧 Why is this design infeasible?")
+            st.write("The beam is **too strong** for such a small target wu.")
+
+            st.markdown("### 🔧 Engineering Recommendations")
             st.write("""
-            - Increase hole diameter h0  
-            - Increase spacing s  
-            - Increase openings N0  
-            - Reduce fy  
-            - Increase span L  
+            To **reduce** strength:
+            - Increase hole diameter **h0**
+            - Increase spacing **s**
+            - Increase number of openings **N0**
+            - Reduce steel grade **fy**
+            - Increase span **L**
             """)
         return
 
-    # PHASE 1: Inverse model selection
+    # PHASE 1: Inverse model prediction
     proba = inv_model.predict_proba([[wu_target, L, h0, s, fy]])[0]
     top_sections = proba.argsort()[-10:][::-1]
 
     results = []
     quantile_cross_issue = False
-
-    # ML classifiers (preloaded from app.py)
-    sci_clf  = st.session_state["sci_clf"]
-    enm_clf  = st.session_state["enm_clf"]
-    ena_clf  = st.session_state["ena_clf"]
-    aisc_clf = st.session_state["aisc_clf"]
-    fm_clf   = st.session_state["fm_clf"]
-
-    df_feat = df_full  # contains Area & fyxArea + applicability flags
 
     for sec in top_sections:
 
@@ -136,91 +139,103 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         if UB_wu < Pred_wu:
             quantile_cross_issue = True
 
-        # ML applicability features
-        L_H = L / H
-        H_ho = H / h0
-        s_h0 = s / h0
-        tf_tw = tf / tw
-        bf_H = bf / H
+        error_ratio = abs(Pred_wu - wu_target) / wu_target
 
-        # find Area and fy×Area (or fyxArea)
-        area_row = df_feat[df_feat.SectionID == sec].iloc[0]
-        Area_val = float(area_row["Area"])
-        FyArea_val = float(
-            area_row["fyxArea"] if "fyxArea" in area_row.index
-            else area_row.get("fy×Area", 0)
-        )
+        # Applicability from dataset
+        app = df_full[df_full.SectionID == sec].iloc[0]
+        SCI_app = app["SCI_applicable"]
+        ENM_app = app["ENM_applicable"]
+        AISC_app = app["AISC_applicable"]
 
-        ML_features = np.array([[H, bf, tw, tf, L, h0, s, s0, se, fy,
-                                 L_H, H_ho, s_h0, tf_tw, bf_H,
-                                 Area_val, FyArea_val]])
+        SCI = ENM = AISC = -1
 
-        # Applicability flags from dataset (1 = applicable, 0 = not applicable)
-        SCI_app  = int(area_row["SCI_applicable"])
-        ENM_app  = int(area_row["ENM_applicable"])
-        ENA_app  = int(area_row["ENA_applicable"])
-        AISC_app = int(area_row["AISC_applicable"])
+        if SCI_app == 1:
+            SCI = check_SCI(H, bf, tw, tf, h0, s0, se)
+        if ENM_app == 1:
+            ENM = check_ENM(H, bf, tw, tf, h0, s0)
+        if AISC_app == 1:
+            AISC = check_AISC(H, bf, tw, tf, h0, s)
 
-        # NEW — ML applicability (N/A → -1)
-        SCI_ML  = -1 if SCI_app  == 0 else sci_clf.predict(ML_features)[0]
-        ENM_ML  = -1 if ENM_app  == 0 else enm_clf.predict(ML_features)[0]
-        ENA_ML  = -1 if ENA_app  == 0 else ena_clf.predict(ML_features)[0]
-        AISC_ML = -1 if AISC_app == 0 else aisc_clf.predict(ML_features)[0]
-
-        # ML failure mode always applicable
-        FM_ML = fm_clf.predict(ML_features)[0]
+        fm_series = df_full[df_full.SectionID == sec]["Failure_mode"]
+        fm = fm_series.mode()[0] if not fm_series.mode().empty else "Unknown"
 
         weight = compute_weight(H, bf, tw, tf, L)
 
-        # NEW scoring: N/A is ignored in penalty
         score = multiobjective_score(
-            wu_target, Pred_wu, weight,
-            SCI_ML, ENM_ML, AISC_ML, FM_ML
+            wu_target, Pred_wu, weight, SCI, ENM, AISC, fm
         )
 
-        # ===============================
-        # OUTPUT — ML ONLY (with emoji)
-        # ===============================
-
         results.append({
-            "SectionID": sec,
             "H (mm)": H,
             "bf (mm)": bf,
             "tw (mm)": tw,
             "tf (mm)": tf,
-
             "Predicted_wu": Pred_wu,
             "LowerBound_wu": LB_wu,
             "UpperBound_wu": UB_wu,
-
-            "SCI":  applicability_to_emoji(SCI_ML),
-            "ENM":  applicability_to_emoji(ENM_ML),
-            "ENA":  applicability_to_emoji(ENA_ML),
-            "AISC": applicability_to_emoji(AISC_ML),
-
-            "Failure_ML": FM_ML,
+            "ErrorRatio": error_ratio,
+            "SCI": code_to_emoji(SCI),
+            "ENM": code_to_emoji(ENM),
+            "AISC": code_to_emoji(AISC),
+            "FailureMode": fm,
             "Weight (kg)": weight,
             "Score": score,
-            "AbsErr": abs(Pred_wu - wu_target),
+            "AbsErr": abs(Pred_wu - wu_target)
         })
 
     df_res = pd.DataFrame(results).sort_values("Score").reset_index(drop=True)
 
-    # Achievability check
+    # Phase 1.5 — Achievability inside feasible range but no good match
     best_wu = df_res.iloc[0]["Predicted_wu"]
-    if abs(best_wu - wu_target) > max(0.15 * wu_target, 5):
-        st.error("❗ No section can reach the target strength within tolerance.")
+    err = abs(best_wu - wu_target)
+
+    tolerance = max(0.15 * wu_target, 5)
+
+    if err > tolerance:
+        st.error("❗ No available section can reach your target strength for the selected geometry.")
+
+        st.markdown("### 📉 Achievability Check")
+        st.write(f"**Target wu:** {wu_target:.2f} kN/m")
+        st.write(f"**Closest achievable wu:** {best_wu:.2f} kN/m")
+        st.write(f"**Difference:** {err:.2f} kN/m")
+
+        if best_wu < wu_target:
+            st.markdown("### 🔧 Engineering Guidance — Increase Strength")
+            st.write("""
+            To **increase** strength:
+            - Decrease hole diameter **h0**
+            - Reduce number of openings **N0**
+            - Increase plate thickness (tf, tw)
+            - Increase steel grade **fy**
+            - Reduce span **L**
+            """)
+        else:
+            st.markdown("### 🔧 Engineering Guidance — Reduce Strength")
+            st.write("""
+            To **reduce** strength:
+            - Increase hole diameter **h0**
+            - Increase spacing **s**
+            - Increase number of openings **N0**
+            - Reduce steel grade **fy**
+            - Increase span **L**
+            """)
         return
 
+    # One-time quantile warning
     if quantile_cross_issue:
-        st.info("ℹ Some quantile values crossed (p90 < p50).")
+        st.info("ℹ️ In some cases, the upper bound (p90) is lower than the median. "
+                "This is normal in quantile regression.")
 
+    # Exact strength-matching section
+    exact_match = df_res.sort_values("AbsErr").iloc[0]
     st.subheader("🎯 Exact Strength-Matching Section")
-    st.write(df_res.sort_values("AbsErr").head(1))
+    st.write(exact_match.to_frame().T)
 
+    # Optimal section
     st.subheader("🏅 Optimal Balanced Section (Lowest Score)")
     st.write(df_res.head(1))
 
+    # Full ranking table
     st.subheader("📊 Full Ranking Table")
     st.dataframe(df_res)
 
