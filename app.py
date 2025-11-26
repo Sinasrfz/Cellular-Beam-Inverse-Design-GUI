@@ -54,7 +54,7 @@ def load_joblib_from_url(url):
 
 
 # ============================================================
-# 2 — LOCAL FILE PATHS
+# 2 — LOCAL FILE PATHS (stored in repo root)
 # ============================================================
 
 FWD_P50        = "forward_p50.joblib"
@@ -85,6 +85,7 @@ def load_forward():
 @st.cache_resource
 def load_lookup():
     df = pd.read_csv(SECTION_LOOKUP)
+
     df.columns = (
         df.columns
         .str.replace(" ", "")
@@ -99,8 +100,6 @@ def load_lookup():
 def load_full_data():
     df = pd.read_excel(DATA_FILE)
 
-    # Clean column names
-    original_cols = df.columns.tolist()
     df.columns = (
         df.columns
         .str.replace(" ", "")
@@ -108,38 +107,6 @@ def load_full_data():
         .str.replace("×", "x")
         .str.strip()
     )
-
-    # ============================================================
-    # NORMALISE APPLICABILITY COLUMN NAMES
-    # ============================================================
-    rename_map = {}
-
-    for col in df.columns:
-        clean = col.lower()
-
-        if clean in ["sci_applicable", "sciapplicable"]:
-            rename_map[col] = "SCI_applicable"
-        if clean in ["enm_applicable", "enmapplicable"]:
-            rename_map[col] = "ENM_applicable"
-        if clean in ["ena_applicable", "enaapplicable"]:
-            rename_map[col] = "ENA_applicable"
-        if clean in ["aisc_applicable", "aiscapplicable"]:
-            rename_map[col] = "AISC_applicable"
-
-    df = df.rename(columns=rename_map)
-
-    # ============================================================
-    # CONVERT YES/NO → 1/0 SAFELY
-    # ============================================================
-    yn_cols = [
-        "SCI_applicable", "ENM_applicable",
-        "ENA_applicable", "AISC_applicable"
-    ]
-
-    for col in yn_cols:
-        if col in df.columns:
-            df[col] = df[col].map({"Yes": 1, "No": 0}).astype(int)
-
     return df
 
 
@@ -159,7 +126,7 @@ try:
 
     st.success("✔ All models and data loaded successfully.")
 
-    # Store in session_state
+    # Store for designer & diagnostics pages
     st.session_state["inv_model"] = inv_model
     st.session_state["fwd_p50"] = fwd_p50
     st.session_state["fwd_p10"] = fwd_p10
@@ -174,7 +141,7 @@ except Exception as e:
 
 
 # ============================================================
-# 5 — NAVIGATION
+# 5 — SIDEBAR NAVIGATION
 # ============================================================
 
 st.sidebar.header("📌 Navigation")
