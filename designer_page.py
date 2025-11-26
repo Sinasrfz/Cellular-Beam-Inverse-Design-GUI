@@ -133,9 +133,26 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         error_ratio = abs(Pred_wu - wu_target) / wu_target
 
         # ------------------------------------------------------------
-        # 🔵 UPDATED BLOCK — USE DATASET APPLICABILITY & CAPACITY
+        # UPDATED BLOCK — choose nearest geometry row in df_full
         # ------------------------------------------------------------
-        app = df_full[df_full.SectionID == sec].iloc[0]
+        candidates = df_full[df_full.SectionID == sec].copy()
+
+        if len(candidates) == 0:
+            # Fallback: no matching SectionID, should not happen
+            continue
+
+        # Compute geometric distance to current design
+        # Using L, h0, s, s0, se, fy
+        candidates["geom_dist"] = (
+            (candidates["L"]  - L)**2  +
+            (candidates["h0"] - h0)**2 +
+            (candidates["s"]  - s)**2  +
+            (candidates["s0"] - s0)**2 +
+            (candidates["se"] - se)**2 +
+            (candidates["fy"] - fy)**2
+        )**0.5
+
+        app = candidates.sort_values("geom_dist").iloc[0]
 
         def to_binary(x):
             if isinstance(x, str):
@@ -163,10 +180,8 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         if AISC_app == 1 and "wAISC" in app.index:
             AISC = 1 if wu_demand <= app["wAISC"] else 0
 
+        fm = app["Failure_mode"]
         # ------------------------------------------------------------
-
-        fm_series = df_full[df_full.SectionID == sec]["Failure_mode"]
-        fm = fm_series.mode()[0] if not fm_series.mode().empty else "Unknown"
 
         weight = compute_weight(H, bf, tw, tf, L)
 
