@@ -8,6 +8,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from stage1_functions import (
+    check_SCI,
+    check_ENM,
+    check_AISC,
     compute_weight,
     multiobjective_score,
     code_to_emoji
@@ -20,12 +23,13 @@ plt.rcParams["font.size"] = 20
 # ------------------------------------------------------------
 # MAIN RENDER FUNCTION
 # ------------------------------------------------------------
-
 def render(inv_model, fwd_p50, fwd_p10, fwd_p90, section_lookup, df_full):
 
     st.header("🏗 Designer Tool — 3-Stage Inverse Design")
 
+    # Sidebar inputs
     st.sidebar.subheader("🧮 Design Inputs")
+
     wu_target = st.sidebar.number_input("Target wu (kN/m)", 5.0, 300.0, 30.0)
     L = st.sidebar.number_input("Beam span L (mm)", 5000.0, 30000.0, 12000.0)
     h0 = st.sidebar.number_input("Opening diameter h0 (mm)", 200.0, 800.0, 400.0)
@@ -33,16 +37,19 @@ def render(inv_model, fwd_p50, fwd_p10, fwd_p90, section_lookup, df_full):
     fy = st.sidebar.number_input("Steel fy (MPa)", 200.0, 600.0, 355.0)
     N0 = st.sidebar.number_input("Number of openings N0", 1, 50, 10)
 
+    # Derived geometric values
     s0 = s - h0
     se = (L - (h0 * N0 + s0 * (N0 - 1))) / 2
 
     st.sidebar.write(f"Computed s0 = {s0:.1f} mm")
     st.sidebar.write(f"Computed se = {se:.1f} mm")
 
+    # Check geometric feasibility
     if se < 0:
         st.error("❌ Selected N0 is NOT feasible for this span. Reduce N0.")
         return
 
+    # Button to run
     if st.button("Run Inverse Design", type="primary"):
         run_inverse(
             wu_target, L, h0, s, s0, se, fy,
@@ -52,18 +59,23 @@ def render(inv_model, fwd_p50, fwd_p10, fwd_p90, section_lookup, df_full):
 
 
 # ------------------------------------------------------------
-# CORE PIPELINE
+# CORE INVERSE DESIGN PIPELINE
 # ------------------------------------------------------------
-
 def run_inverse(wu_target, L, h0, s, s0, se, fy,
                 inv_model, fwd_p50, fwd_p10, fwd_p90,
                 section_lookup, df_full):
 
     st.subheader("🔍 Phase 1 — Inverse Model Prediction")
 
+    # Compute full feasible forward space (min/max wu)
     all_wu_p50 = []
+
     for _, row in section_lookup.iterrows():
-        H = row.H; bf = row.bf; tw = row.tw; tf = row.tf
+        H = row.H
+        bf = row.bf
+        tw = row.tw
+        tf = row.tf
+
         Xtest = np.array([[H, bf, tw, tf, L, h0, s, s0, se, fy]])
         val = fwd_p50.predict(Xtest)[0]
         all_wu_p50.append(val)
@@ -71,6 +83,7 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
     wu_min = min(all_wu_p50)
     wu_max = max(all_wu_p50)
 
+    # Physical feasibility check
     if wu_target < wu_min or wu_target > wu_max:
 
         st.error("❌ The requested target strength is NOT physically achievable with this geometry and material configuration.")
@@ -80,33 +93,40 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         st.write(f"**Minimum achievable wu:** {wu_min:.2f} kN/m")
         st.write(f"**Maximum achievable wu:** {wu_max:.2f} kN/m")
 
+        # Engineering explanation & tips
         if wu_target > wu_max:
             st.markdown("### 🔧 Why is this design infeasible?")
             st.write("The beam is **too weak** to reach such a high wu.")
 
             st.markdown("### 🔧 Engineering Recommendations")
             st.write("""
-            To **increase** strength:
-            - Decrease hole diameter **h0**
-            - Reduce number of openings **N0**
-            - Increase plate thickness (tf, tw)
-            - Increase steel grade **fy**
-            - Reduce span **L**
+                To **increase** strength:
+                - Decrease hole diameter **h0**
+                - Reduce number of openings **N0**
+                - Increase plate thickness (tf, tw)
+                - Increase steel grade **fy**
+                - Reduce span **L**
             """)
+
         else:
             st.markdown("### 🔧 Why is this design infeasible?")
             st.write("The beam is **too strong** for such a small target wu.")
 
             st.markdown("### 🔧 Engineering Recommendations")
             st.write("""
-            To **reduce** strength:
-            - Increase hole diameter **h0**
-            - Increase spacing **s**
-            - Increase number of openings **N0**
-            - Reduce steel grade **fy**
-            - Increase span **L**
+                To **reduce** strength:
+                - Increase hole diameter **h0**
+                - Increase spacing **s**
+                - Increase number of openings **N0**
+                - Reduce steel grade **fy**
+                - Increase span **L**
             """)
+
         return
+
+    # --------------------------------------------------------
+    # PHASE 1 — Inverse model probability ranking
+    # --------------------------------------------------------
 
     proba = inv_model.predict_proba([[wu_target, L, h0, s, fy]])[0]
     top_sections = proba.argsort()[-10:][::-1]
@@ -117,12 +137,15 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
     for sec in top_sections:
 
         row = section_lookup[section_lookup.SectionID == sec].iloc[0]
+
         H = int(row.H)
         bf = int(row.bf)
         tw = float(row.tw)
         tf = float(row.tf)
 
+        # Forward prediction
         Xtest = np.array([[H, bf, tw, tf, L, h0, s, s0, se, fy]])
+
         Pred_wu = fwd_p50.predict(Xtest)[0]
         LB_wu = fwd_p10.predict(Xtest)[0]
         UB_wu = fwd_p90.predict(Xtest)[0]
@@ -132,56 +155,32 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
 
         error_ratio = abs(Pred_wu - wu_target) / wu_target
 
-        # ------------------------------------------------------------
-        # UPDATED BLOCK — choose nearest geometry row in df_full
-        # ------------------------------------------------------------
-        candidates = df_full[df_full.SectionID == sec].copy()
+        # Load applicability from dataset
+        app = df_full[df_full.SectionID == sec].iloc[0]
 
-        if len(candidates) == 0:
-            # Fallback: no matching SectionID, should not happen
-            continue
+        SCI_app = app["SCI_applicable"]
+        ENM_app = app["ENM_applicable"]
+        AISC_app = app["AISC_applicable"]
 
-        # Compute geometric distance to current design
-        # Using L, h0, s, s0, se, fy
-        candidates["geom_dist"] = (
-            (candidates["L"]  - L)**2  +
-            (candidates["h0"] - h0)**2 +
-            (candidates["s"]  - s)**2  +
-            (candidates["s0"] - s0)**2 +
-            (candidates["se"] - se)**2 +
-            (candidates["fy"] - fy)**2
-        )**0.5
-
-        app = candidates.sort_values("geom_dist").iloc[0]
-
-        def to_binary(x):
-            if isinstance(x, str):
-                v = x.strip().lower()
-                if v in ("yes", "y", "1", "true"):
-                    return 1
-                if v in ("no", "n", "0", "false"):
-                    return 0
-            try:
-                return int(x)
-            except:
-                return -1
-
-        SCI_app  = to_binary(app["SCI_applicable"])
-        ENM_app  = to_binary(app["ENM_applicable"])
-        AISC_app = to_binary(app["AISC_applicable"])
-
+        # Apply code checks only if applicable
         SCI = ENM = AISC = -1
-        wu_demand = Pred_wu
 
-        if SCI_app == 1 and "wSCI" in app.index:
-            SCI = 1 if wu_demand <= app["wSCI"] else 0
-        if ENM_app == 1 and "wENM" in app.index:
-            ENM = 1 if wu_demand <= app["wENM"] else 0
-        if AISC_app == 1 and "wAISC" in app.index:
-            AISC = 1 if wu_demand <= app["wAISC"] else 0
+        if SCI_app == 1:
+            SCI = check_SCI(H, bf, tw, tf, h0, s0, se)
 
-        fm = app["Failure_mode"]
-        # ------------------------------------------------------------
+        if ENM_app == 1:
+            ENM = check_ENM(H, bf, tw, tf, h0, s0)
+
+        if AISC_app == 1:
+            AISC = check_AISC(H, bf, tw, tf, h0, s)
+
+        # Failure mode from dataset
+        fm_series = df_full[df_full.SectionID == sec]["Failure_mode"]
+
+        if not fm_series.mode().empty:
+            fm = fm_series.mode()[0]
+        else:
+            fm = "Unknown"
 
         weight = compute_weight(H, bf, tw, tf, L)
 
@@ -209,11 +208,17 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
 
     df_res = pd.DataFrame(results).sort_values("Score").reset_index(drop=True)
 
+    # --------------------------------------------------------
+    # PHASE 1.5 — Achievability check inside feasible range
+    # --------------------------------------------------------
+
     best_wu = df_res.iloc[0]["Predicted_wu"]
     err = abs(best_wu - wu_target)
+
     tolerance = max(0.15 * wu_target, 5)
 
     if err > tolerance:
+
         st.error("❗ No available section can reach your target strength for the selected geometry.")
 
         st.markdown("### 📉 Achievability Check")
@@ -224,35 +229,52 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         if best_wu < wu_target:
             st.markdown("### 🔧 Engineering Guidance — Increase Strength")
             st.write("""
-            To **increase** strength:
-            - Decrease hole diameter **h0**
-            - Reduce number of openings **N0**
-            - Increase plate thickness (tf, tw)
-            - Increase steel grade **fy**
-            - Reduce span **L**
+                To **increase** strength:
+                - Decrease hole diameter **h0**
+                - Reduce number of openings **N0**
+                - Increase plate thickness (tf, tw)
+                - Increase steel grade **fy**
+                - Reduce span **L**
             """)
         else:
             st.markdown("### 🔧 Engineering Guidance — Reduce Strength")
             st.write("""
-            To **reduce** strength:
-            - Increase hole diameter **h0**
-            - Increase spacing **s**
-            - Increase number of openings **N0**
-            - Reduce steel grade **fy**
-            - Increase span **L**
+                To **reduce** strength:
+                - Increase hole diameter **h0**
+                - Increase spacing **s**
+                - Increase number of openings **N0**
+                - Reduce steel grade **fy**
+                - Increase span **L**
             """)
+
         return
 
+    # One-time warning for quantile anomalies
     if quantile_cross_issue:
-        st.info("ℹ️ In some cases, the upper bound_wu is lower than the predicted_wu. "
-                "This is normal in quantile regression.")
+        st.info(
+            "ℹ️ In some cases, the upper bound (p90) is lower than the median. "
+            "This can occur in quantile regression."
+        )
+
+    # --------------------------------------------------------
+    # EXACT STRENGTH MATCH
+    # --------------------------------------------------------
 
     exact_match = df_res.sort_values("AbsErr").iloc[0]
+
     st.subheader("🎯 Exact Strength-Matching Section")
     st.write(exact_match.to_frame().T)
 
+    # --------------------------------------------------------
+    # OPTIMAL SECTION
+    # --------------------------------------------------------
+
     st.subheader("🏅 Optimal Balanced Section (Lowest Score)")
     st.write(df_res.head(1))
+
+    # --------------------------------------------------------
+    # FULL TABLE
+    # --------------------------------------------------------
 
     st.subheader("📊 Full Ranking Table")
     st.dataframe(df_res)
