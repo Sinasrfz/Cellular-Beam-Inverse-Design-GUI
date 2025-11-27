@@ -1,5 +1,5 @@
 # ============================================================
-# designer_page.py — 3-Stage Inverse Design (Updated Version)
+# designer_page.py — 3-Stage Inverse Design (KNN Version)
 # ============================================================
 
 import streamlit as st
@@ -20,10 +20,17 @@ plt.rcParams["font.size"] = 20
 # ------------------------------------------------------------
 # MAIN RENDER FUNCTION
 # ------------------------------------------------------------
+# IMPORTANT:
+# Now designer_page receives the 4 KNN objects as parameters:
+# knn_model, scaler_knn, X_knn_raw, knn_section_ids
+# (loaded in main.py or home_page.py)
+# ------------------------------------------------------------
 
-def render(inv_model, fwd_p50, fwd_p10, fwd_p90, section_lookup, df_full):
+def render(knn_model, scaler_knn, X_knn_raw, knn_section_ids,
+           fwd_p50, fwd_p10, fwd_p90,
+           section_lookup, df_full):
 
-    st.header("🏗 Designer Tool — 3-Stage Inverse Design")
+    st.header("🏗 Designer Tool — 3-Stage Inverse Design (KNN Version)")
 
     st.sidebar.subheader("🧮 Design Inputs")
     wu_target = st.sidebar.number_input("Target wu (kN/m)", 5.0, 300.0, 30.0)
@@ -46,7 +53,8 @@ def render(inv_model, fwd_p50, fwd_p10, fwd_p90, section_lookup, df_full):
     if st.button("Run Inverse Design", type="primary"):
         run_inverse(
             wu_target, L, h0, s, s0, se, fy,
-            inv_model, fwd_p50, fwd_p10, fwd_p90,
+            knn_model, scaler_knn, X_knn_raw, knn_section_ids,
+            fwd_p50, fwd_p10, fwd_p90,
             section_lookup, df_full
         )
 
@@ -56,10 +64,40 @@ def render(inv_model, fwd_p50, fwd_p10, fwd_p90, section_lookup, df_full):
 # ------------------------------------------------------------
 
 def run_inverse(wu_target, L, h0, s, s0, se, fy,
-                inv_model, fwd_p50, fwd_p10, fwd_p90,
+                knn_model, scaler_knn, X_knn_raw, knn_section_ids,
+                fwd_p50, fwd_p10, fwd_p90,
                 section_lookup, df_full):
 
-    st.subheader("🔍 Phase 1 — Inverse Model Prediction")
+    st.subheader("🔍 Phase 1 — Inverse Retrieval Using KNN")
+
+    # ------------------------------------------------------------
+    # BUILD NORMALIZED QUERY VECTOR FOR KNN
+    # (Use SAME feature structure as training)
+    # ------------------------------------------------------------
+    q = np.array([[
+        wu_target,
+        L,
+        h0,
+        s,
+        fy,
+        L / 400.0,   # neutral L/H estimate
+        s / h0,      # actual
+        1.0,         # neutral H/h0
+        2.0          # neutral tf/tw
+    ]])
+
+    q_scaled = scaler_knn.transform(q)
+
+    # Retrieve nearest 10 SectionIDs
+    dist, idx = knn_model.kneighbors(q_scaled, n_neighbors=10)
+    top_sections = knn_section_ids[idx[0]]
+
+    st.write("Top retrieved SectionIDs:", list(top_sections))
+
+
+    # ------------------------------------------------------------
+    # PHASE 2 — Forward Model Check (Quantile Prediction)
+    # ------------------------------------------------------------
 
     all_wu_p50 = []
     for _, row in section_lookup.iterrows():
@@ -73,43 +111,38 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
 
     if wu_target < wu_min or wu_target > wu_max:
 
-        st.error("❌ The requested target strength is NOT physically achievable with this geometry and material configuration.")
+        st.error("❌ The requested target strength is NOT physically achievable.")
 
         st.markdown("### 📉 Feasibility Summary")
-        st.write(f"**Target wu:** {wu_target:.2f} kN/m")
-        st.write(f"**Minimum achievable wu:** {wu_min:.2f} kN/m")
-        st.write(f"**Maximum achievable wu:** {wu_max:.2f} kN/m")
+        st.write(f"Target wu: {wu_target:.2f} kN/m")
+        st.write(f"Minimum achievable wu: {wu_min:.2f} kN/m")
+        st.write(f"Maximum achievable wu: {wu_max:.2f} kN/m")
 
         if wu_target > wu_max:
-            st.markdown("### 🔧 Why is this design infeasible?")
-            st.write("The beam is **too weak** to reach such a high wu.")
-
-            st.markdown("### 🔧 Engineering Recommendations")
+            st.markdown("### 🔧 Increase Strength")
             st.write("""
-            To **increase** strength:
-            - Decrease hole diameter **h0**
-            - Reduce number of openings **N0**
-            - Increase plate thickness (tf, tw)
-            - Increase steel grade **fy**
-            - Reduce span **L**
+            - Reduce opening h0  
+            - Reduce N0  
+            - Increase tf or tw  
+            - Increase fy  
+            - Reduce L  
             """)
         else:
-            st.markdown("### 🔧 Why is this design infeasible?")
-            st.write("The beam is **too strong** for such a small target wu.")
-
-            st.markdown("### 🔧 Engineering Recommendations")
+            st.markdown("### 🔧 Reduce Strength")
             st.write("""
-            To **reduce** strength:
-            - Increase hole diameter **h0**
-            - Increase spacing **s**
-            - Increase number of openings **N0**
-            - Reduce steel grade **fy**
-            - Increase span **L**
+            - Increase opening h0  
+            - Increase spacing s  
+            - Increase N0  
+            - Reduce fy  
+            - Increase L  
             """)
         return
 
-    proba = inv_model.predict_proba([[wu_target, L, h0, s, fy]])[0]
-    top_sections = proba.argsort()[-10:][::-1]
+    st.subheader("🧠 Phase 2 — Forward Predictions for Candidate Sections")
+
+    # ------------------------------------------------------------
+    # PHASE 3 — Evaluate Retrieved Sections
+    # ------------------------------------------------------------
 
     results = []
     quantile_cross_issue = False
@@ -117,36 +150,28 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
     for sec in top_sections:
 
         row = section_lookup[section_lookup.SectionID == sec].iloc[0]
-        H = int(row.H)
-        bf = int(row.bf)
-        tw = float(row.tw)
-        tf = float(row.tf)
+        H = int(row.H); bf = int(row.bf); tw = float(row.tw); tf = float(row.tf)
 
+        # Forward predictions
         Xtest = np.array([[H, bf, tw, tf, L, h0, s, s0, se, fy]])
         Pred_wu = fwd_p50.predict(Xtest)[0]
-        LB_wu = fwd_p10.predict(Xtest)[0]
-        UB_wu = fwd_p90.predict(Xtest)[0]
+        LB_wu   = fwd_p10.predict(Xtest)[0]
+        UB_wu   = fwd_p90.predict(Xtest)[0]
 
         if UB_wu < Pred_wu:
             quantile_cross_issue = True
 
         error_ratio = abs(Pred_wu - wu_target) / wu_target
 
-        # ------------------------------------------------------------
-        # UPDATED BLOCK — choose nearest geometry row in df_full
-        # ------------------------------------------------------------
+        # Select correct geometry row from df_full
         candidates = df_full[df_full.SectionID == sec].copy()
-
         if len(candidates) == 0:
-            # Fallback: no matching SectionID, should not happen
             continue
 
-        # Compute geometric distance to current design
-        # Using L, h0, s, s0, se, fy
         candidates["geom_dist"] = (
-            (candidates["L"]  - L)**2  +
+            (candidates["L"]  - L)**2 +
             (candidates["h0"] - h0)**2 +
-            (candidates["s"]  - s)**2  +
+            (candidates["s"]  - s)**2 +
             (candidates["s0"] - s0)**2 +
             (candidates["se"] - se)**2 +
             (candidates["fy"] - fy)**2
@@ -154,17 +179,14 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
 
         app = candidates.sort_values("geom_dist").iloc[0]
 
+        # Clean binary
         def to_binary(x):
             if isinstance(x, str):
                 v = x.strip().lower()
-                if v in ("yes", "y", "1", "true"):
-                    return 1
-                if v in ("no", "n", "0", "false"):
-                    return 0
-            try:
-                return int(x)
-            except:
-                return -1
+                if v in ("yes","y","1","true"): return 1
+                if v in ("no","n","0","false"): return 0
+            try: return int(x)
+            except: return -1
 
         SCI_app  = to_binary(app["SCI_applicable"])
         ENM_app  = to_binary(app["ENM_applicable"])
@@ -173,15 +195,11 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         SCI = ENM = AISC = -1
         wu_demand = Pred_wu
 
-        if SCI_app == 1 and "wSCI" in app.index:
-            SCI = 1 if wu_demand <= app["wSCI"] else 0
-        if ENM_app == 1 and "wENM" in app.index:
-            ENM = 1 if wu_demand <= app["wENM"] else 0
-        if AISC_app == 1 and "wAISC" in app.index:
-            AISC = 1 if wu_demand <= app["wAISC"] else 0
+        if SCI_app == 1:  SCI = 1 if wu_demand <= app["wSCI"]  else 0
+        if ENM_app == 1:  ENM = 1 if wu_demand <= app["wENM"]  else 0
+        if AISC_app == 1: AISC = 1 if wu_demand <= app["wAISC"] else 0
 
         fm = app["Failure_mode"]
-        # ------------------------------------------------------------
 
         weight = compute_weight(H, bf, tw, tf, L)
 
@@ -190,10 +208,7 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         )
 
         results.append({
-            "H (mm)": H,
-            "bf (mm)": bf,
-            "tw (mm)": tw,
-            "tf (mm)": tf,
+            "H (mm)": H, "bf (mm)": bf, "tw (mm)": tw, "tf (mm)": tf,
             "Predicted_wu": Pred_wu,
             "LowerBound_wu": LB_wu,
             "UpperBound_wu": UB_wu,
@@ -209,47 +224,24 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
 
     df_res = pd.DataFrame(results).sort_values("Score").reset_index(drop=True)
 
+    # ------------------------------------------------------------
+    # FINAL OUTPUTS
+    # ------------------------------------------------------------
+
+    if quantile_cross_issue:
+        st.info("ℹ Some quantile inconsistencies detected (normal for quantile regression).")
+
     best_wu = df_res.iloc[0]["Predicted_wu"]
     err = abs(best_wu - wu_target)
     tolerance = max(0.15 * wu_target, 5)
 
     if err > tolerance:
-        st.error("❗ No available section can reach your target strength for the selected geometry.")
-
-        st.markdown("### 📉 Achievability Check")
-        st.write(f"**Target wu:** {wu_target:.2f} kN/m")
-        st.write(f"**Closest achievable wu:** {best_wu:.2f} kN/m")
-        st.write(f"**Difference:** {err:.2f} kN/m")
-
-        if best_wu < wu_target:
-            st.markdown("### 🔧 Engineering Guidance — Increase Strength")
-            st.write("""
-            To **increase** strength:
-            - Decrease hole diameter **h0**
-            - Reduce number of openings **N0**
-            - Increase plate thickness (tf, tw)
-            - Increase steel grade **fy**
-            - Reduce span **L**
-            """)
-        else:
-            st.markdown("### 🔧 Engineering Guidance — Reduce Strength")
-            st.write("""
-            To **reduce** strength:
-            - Increase hole diameter **h0**
-            - Increase spacing **s**
-            - Increase number of openings **N0**
-            - Reduce steel grade **fy**
-            - Increase span **L**
-            """)
+        st.error("❌ No feasible section meets the target strength.")
+        st.write(df_res.head(1))
         return
 
-    if quantile_cross_issue:
-        st.info("ℹ️ In some cases, the upper bound_wu is lower than the predicted_wu. "
-                "This is normal in quantile regression.")
-
-    exact_match = df_res.sort_values("AbsErr").iloc[0]
     st.subheader("🎯 Exact Strength-Matching Section")
-    st.write(exact_match.to_frame().T)
+    st.write(df_res.sort_values("AbsErr").iloc[0:1])
 
     st.subheader("🏅 Optimal Balanced Section (Lowest Score)")
     st.write(df_res.head(1))
