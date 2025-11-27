@@ -18,14 +18,8 @@ plt.rcParams["font.size"] = 20
 
 
 # ------------------------------------------------------------
-# MAIN RENDER FUNCTION
+# MAIN RENDER FUNCTION (MUST MATCH app.py)
 # ------------------------------------------------------------
-# IMPORTANT:
-# App passes 4 KNN objects:
-# knn_model, scaler_knn, X_knn_raw, knn_section_ids
-# + forward models + section lookup + full dataset
-# ------------------------------------------------------------
-
 def render(knn_model, scaler_knn, X_knn_raw, knn_section_ids,
            fwd_p50, fwd_p10, fwd_p90,
            section_lookup, df_full):
@@ -62,7 +56,6 @@ def render(knn_model, scaler_knn, X_knn_raw, knn_section_ids,
 # ------------------------------------------------------------
 # CORE PIPELINE
 # ------------------------------------------------------------
-
 def run_inverse(wu_target, L, h0, s, s0, se, fy,
                 knn_model, scaler_knn, X_knn_raw, knn_section_ids,
                 fwd_p50, fwd_p10, fwd_p90,
@@ -70,10 +63,7 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
 
     st.subheader("🔍 Phase 1 — Inverse Retrieval Using KNN")
 
-    # ------------------------------------------------------------
-    # CORRECTED NORMALIZED QUERY
-    # (Same feature structure as training)
-    # ------------------------------------------------------------
+    # Build query
     q = np.array([[
 
         wu_target,
@@ -82,25 +72,21 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         s,
         fy,
 
-        # REAL features, not dummy placeholders:
-        L / (L / 400.0),     # = 400, same scale assumption used earlier
+        L / (L / 400.0),     
         s / h0,
         h0 / L,
-        tf_tw_placeholder := 1.5  # Neutral ratio
-
+        1.5
     ]])
 
     q_scaled = scaler_knn.transform(q)
 
-    # Retrieve nearest 10
     dist, idx = knn_model.kneighbors(q_scaled, n_neighbors=10)
     top_sections = knn_section_ids[idx[0]]
 
     st.write("Top retrieved SectionIDs:", list(top_sections))
 
-
     # ------------------------------------------------------------
-    # PHASE 2 — Forward Model Check
+    # PHASE 2 — Forward Model feasibility check
     # ------------------------------------------------------------
 
     all_wu_p50 = []
@@ -114,40 +100,14 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
     wu_max = max(all_wu_p50)
 
     if wu_target < wu_min or wu_target > wu_max:
-
-        st.error("❌ The requested target strength is NOT physically achievable.")
-
-        st.markdown("### 📉 Feasibility Summary")
-        st.write(f"Target wu: {wu_target:.2f} kN/m")
-        st.write(f"Minimum achievable wu: {wu_min:.2f} kN/m")
-        st.write(f"Maximum achievable wu: {wu_max:.2f} kN/m")
-
-        if wu_target > wu_max:
-            st.markdown("### 🔧 Increase Strength")
-            st.write("""
-            - Reduce opening h0  
-            - Reduce N0  
-            - Increase tf or tw  
-            - Increase fy  
-            - Reduce L  
-            """)
-        else:
-            st.markdown("### 🔧 Reduce Strength")
-            st.write("""
-            - Increase opening h0  
-            - Increase spacing s  
-            - Increase N0  
-            - Reduce fy  
-            - Increase L  
-            """)
+        st.error("❌ Target strength is NOT physically achievable with this geometry.")
+        st.write(f"Min wu: {wu_min:.2f}  |  Max wu: {wu_max:.2f}")
         return
 
-
-    st.subheader("🧠 Phase 2 — Forward Predictions for Candidate Sections")
-
+    st.subheader("🧠 Phase 2 — Forward Predictions for Retrieved Sections")
 
     # ------------------------------------------------------------
-    # PHASE 3 — Evaluate Retrieved Sections
+    # PHASE 3 — Evaluate Candidates
     # ------------------------------------------------------------
 
     results = []
@@ -160,7 +120,6 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         H = int(row.H); bf = int(row.bf)
         tw = float(row.tw); tf = float(row.tf)
 
-        # Forward predictions
         Xtest = np.array([[H, bf, tw, tf, L, h0, s, s0, se, fy]])
 
         Pred_wu = fwd_p50.predict(Xtest)[0]
@@ -172,18 +131,17 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
 
         error_ratio = abs(Pred_wu - wu_target) / wu_target
 
-        # Nearest geometry candidate
         candidates = df_full[df_full.SectionID == sec].copy()
         if len(candidates) == 0:
             continue
 
         candidates["geom_dist"] = (
-            (candidates["L"]  - L)**2 +
-            (candidates["h0"] - h0)**2 +
-            (candidates["s"]  - s)**2 +
-            (candidates["s0"] - s0)**2 +
-            (candidates["se"] - se)**2 +
-            (candidates["fy"] - fy)**2
+                (candidates["L"] - L)**2 +
+                (candidates["h0"] - h0)**2 +
+                (candidates["s"] - s)**2 +
+                (candidates["s0"] - s0)**2 +
+                (candidates["se"] - se)**2 +
+                (candidates["fy"] - fy)**2
         )**0.5
 
         app = candidates.sort_values("geom_dist").iloc[0]
@@ -191,8 +149,8 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         def to_binary(x):
             if isinstance(x, str):
                 v = x.strip().lower()
-                if v in ("yes","y","1","true"): return 1
-                if v in ("no","n","0","false"): return 0
+                if v in ("yes", "y", "1", "true"): return 1
+                if v in ("no",  "n", "0", "false"): return 0
             try: return int(x)
             except: return -1
 
@@ -203,9 +161,12 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         SCI = ENM = AISC = -1
         wu_demand = Pred_wu
 
-        if SCI_app == 1:  SCI = 1 if wu_demand <= app["wSCI"]  else 0
-        if ENM_app == 1:  ENM = 1 if wu_demand <= app["wENM"]  else 0
-        if AISC_app == 1: AISC = 1 if wu_demand <= app["wAISC"] else 0
+        if SCI_app == 1:
+            SCI = 1 if wu_demand <= app["wSCI"] else 0
+        if ENM_app == 1:
+            ENM = 1 if wu_demand <= app["wENM"] else 0
+        if AISC_app == 1:
+            AISC = 1 if wu_demand <= app["wAISC"] else 0
 
         fm = app["Failure_mode"]
 
@@ -231,18 +192,13 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
         })
 
     if len(results) == 0:
-        st.error("❌ No matching sections found. Check geometric inputs.")
+        st.error("❌ No matching sections found.")
         return
 
     df_res = pd.DataFrame(results).sort_values("Score").reset_index(drop=True)
 
-
-    # ------------------------------------------------------------
-    # FINAL OUTPUTS
-    # ------------------------------------------------------------
-
     if quantile_cross_issue:
-        st.info("ℹ Some quantile inconsistencies detected (normal for quantile regression).")
+        st.info("ℹ Quantile inconsistency detected (normal for quantile models).")
 
     best_wu = df_res.iloc[0]["Predicted_wu"]
     err = abs(best_wu - wu_target)
@@ -256,7 +212,7 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
     st.subheader("🎯 Exact Strength-Matching Section")
     st.write(df_res.sort_values("AbsErr").iloc[0:1])
 
-    st.subheader("🏅 Optimal Balanced Section (Lowest Score)")
+    st.subheader("🏅 Optimal Balanced Section")
     st.write(df_res.head(1))
 
     st.subheader("📊 Full Ranking Table")
