@@ -7,14 +7,37 @@ import joblib
 import pandas as pd
 import requests
 import io
+import re
+
+
+# ============================================================
+# MOBILE SAFARI HOTFIX — Prevent Markdown Regex Crash
+# ============================================================
+
+# Safari (and iOS Chrome) crash when Streamlit applies the
+# GitHub-Flavored-Markdown autolink regex.
+# This patch replaces the problematic regex with a safe one.
+
+try:
+    if hasattr(st.markdown, "__globals__"):
+        md_globals = st.markdown.__globals__
+        if "GFM_AUTOLINK_RE" in md_globals:
+            md_globals["GFM_AUTOLINK_RE"] = re.compile(
+                r"(https?://[^\s]+)", re.IGNORECASE
+            )
+except Exception:
+    pass
+
 
 # ------------------------------------------------------------
 # STREAMLIT PAGE CONFIGURATION
 # ------------------------------------------------------------
+
 st.set_page_config(
     page_title="Cellular Beam Inverse Design Tool",
     layout="wide"
 )
+
 st.title("🧠 Cellular Beam Inverse Design Tool")
 
 
@@ -26,6 +49,7 @@ INVERSE_MODEL_URL = (
     "https://github.com/Sinasrfz/Cellular-Beam-Inverse-Design-GUI/"
     "releases/download/v1.0/inverse_model_catboost.joblib"
 )
+
 
 def load_joblib_from_url(url):
     """Download .joblib file from GitHub Releases."""
@@ -40,20 +64,14 @@ def load_joblib_from_url(url):
 
 
 # ============================================================
-# 2 — LOCAL FILE PATHS (stored in GitHub repo root)
+# 2 — LOCAL FILE PATHS
 # ============================================================
 
-FWD_P50        = "forward_p50.joblib"
-FWD_P10        = "forward_p10.joblib"
-FWD_P90        = "forward_p90.joblib"
+FWD_P50 = "forward_p50.joblib"
+FWD_P10 = "forward_p10.joblib"
+FWD_P90 = "forward_p90.joblib"
 SECTION_LOOKUP = "section_lookup.csv"
-DATA_FILE      = "21.xlsx"
-
-# NEW KNN FILE PATHS (MUST MATCH YOUR TRAINING OUTPUTS)
-KNN_MODEL      = "inverse_knn.joblib"
-KNN_SCALER     = "inverse_knn_scaler.joblib"
-KNN_X_RAW      = "inverse_knn_X_raw.joblib"
-KNN_IDS        = "inverse_knn_section_ids.joblib"
+DATA_FILE = "21.xlsx"
 
 
 # ============================================================
@@ -62,9 +80,8 @@ KNN_IDS        = "inverse_knn_section_ids.joblib"
 
 @st.cache_resource
 def load_inverse():
-    # This is no longer used for inverse design
-    # but keeping to avoid breaking old dependencies
     return load_joblib_from_url(INVERSE_MODEL_URL)
+
 
 @st.cache_resource
 def load_forward():
@@ -74,10 +91,10 @@ def load_forward():
         joblib.load(FWD_P90)
     )
 
+
 @st.cache_resource
 def load_lookup():
     df = pd.read_csv(SECTION_LOOKUP)
-
     df.columns = (
         df.columns
         .str.replace(" ", "")
@@ -86,11 +103,11 @@ def load_lookup():
         .str.strip()
     )
     return df
+
 
 @st.cache_resource
 def load_full_data():
     df = pd.read_excel(DATA_FILE)
-
     df.columns = (
         df.columns
         .str.replace(" ", "")
@@ -99,27 +116,6 @@ def load_full_data():
         .str.strip()
     )
     return df
-
-# ------------------------------
-# NEW: KNN LOADERS
-# ------------------------------
-
-@st.cache_resource
-def load_knn_model():
-    return joblib.load(KNN_MODEL)
-
-@st.cache_resource
-def load_knn_scaler():
-    return joblib.load(KNN_SCALER)
-
-@st.cache_resource
-def load_knn_X_raw():
-    return joblib.load(KNN_X_RAW)
-
-@st.cache_resource
-def load_knn_ids():
-    return joblib.load(KNN_IDS)
-
 
 
 # ============================================================
@@ -127,17 +123,10 @@ def load_knn_ids():
 # ============================================================
 
 try:
-    inv_model = load_inverse()       # kept for compatibility (no longer used)
-
+    inv_model = load_inverse()
     fwd_p50, fwd_p10, fwd_p90 = load_forward()
     section_lookup = load_lookup()
     df_full = load_full_data()
-
-    # NEW KNN MODELS
-    knn_model      = load_knn_model()
-    scaler_knn     = load_knn_scaler()
-    X_knn_raw      = load_knn_X_raw()
-    knn_section_ids = load_knn_ids()
 
     if "SectionID" not in df_full.columns:
         st.error("❌ ERROR: Your dataset does NOT contain SectionID.")
@@ -145,19 +134,13 @@ try:
 
     st.success("✔ All models and data loaded successfully.")
 
-    # Store for use in pages
-    st.session_state["inv_model"] = inv_model           # unused but kept
+    # Store everything for Diagnostics page
+    st.session_state["inv_model"] = inv_model
     st.session_state["fwd_p50"] = fwd_p50
     st.session_state["fwd_p10"] = fwd_p10
     st.session_state["fwd_p90"] = fwd_p90
     st.session_state["section_lookup"] = section_lookup
     st.session_state["df_full"] = df_full
-
-    # NEW KNN state storage
-    st.session_state["knn_model"] = knn_model
-    st.session_state["scaler_knn"] = scaler_knn
-    st.session_state["X_knn_raw"] = X_knn_raw
-    st.session_state["knn_section_ids"] = knn_section_ids
 
 except Exception as e:
     st.error("❌ Failed to load required assets.")
@@ -170,6 +153,7 @@ except Exception as e:
 # ============================================================
 
 st.sidebar.header("📌 Navigation")
+
 page = st.sidebar.radio(
     "Go to:",
     [
@@ -182,16 +166,13 @@ page = st.sidebar.radio(
 
 
 # ============================================================
-# 6 — PAGE ROUTING (UPDATED CALL SIGNATURE)
+# 6 — PAGE ROUTING
 # ============================================================
 
 if page == "🏗 Designer Tool":
     import designer_page
     designer_page.render(
-        st.session_state["knn_model"],
-        st.session_state["scaler_knn"],
-        st.session_state["X_knn_raw"],
-        st.session_state["knn_section_ids"],
+        st.session_state["inv_model"],
         st.session_state["fwd_p50"],
         st.session_state["fwd_p10"],
         st.session_state["fwd_p90"],
