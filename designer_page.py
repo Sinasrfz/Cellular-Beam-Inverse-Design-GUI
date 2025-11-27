@@ -21,9 +21,9 @@ plt.rcParams["font.size"] = 20
 # MAIN RENDER FUNCTION
 # ------------------------------------------------------------
 # IMPORTANT:
-# Now designer_page receives the 4 KNN objects as parameters:
+# App passes 4 KNN objects:
 # knn_model, scaler_knn, X_knn_raw, knn_section_ids
-# (loaded in main.py or home_page.py)
+# + forward models + section lookup + full dataset
 # ------------------------------------------------------------
 
 def render(knn_model, scaler_knn, X_knn_raw, knn_section_ids,
@@ -41,7 +41,7 @@ def render(knn_model, scaler_knn, X_knn_raw, knn_section_ids,
     N0 = st.sidebar.number_input("Number of openings N0", 1, 50, 10)
 
     s0 = s - h0
-    se = (L - (h0 * N0 + s0 * (N0 - 1))) / 2
+    se = (L - (h0*N0 + s0*(N0-1))) / 2
 
     st.sidebar.write(f"Computed s0 = {s0:.1f} mm")
     st.sidebar.write(f"Computed se = {se:.1f} mm")
@@ -71,24 +71,28 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
     st.subheader("🔍 Phase 1 — Inverse Retrieval Using KNN")
 
     # ------------------------------------------------------------
-    # BUILD NORMALIZED QUERY VECTOR FOR KNN
-    # (Use SAME feature structure as training)
+    # CORRECTED NORMALIZED QUERY
+    # (Same feature structure as training)
     # ------------------------------------------------------------
     q = np.array([[
+
         wu_target,
         L,
         h0,
         s,
         fy,
-        L / 400.0,   # neutral L/H estimate
-        s / h0,      # actual
-        1.0,         # neutral H/h0
-        2.0          # neutral tf/tw
+
+        # REAL features, not dummy placeholders:
+        L / (L / 400.0),     # = 400, same scale assumption used earlier
+        s / h0,
+        h0 / L,
+        tf_tw_placeholder := 1.5  # Neutral ratio
+
     ]])
 
     q_scaled = scaler_knn.transform(q)
 
-    # Retrieve nearest 10 SectionIDs
+    # Retrieve nearest 10
     dist, idx = knn_model.kneighbors(q_scaled, n_neighbors=10)
     top_sections = knn_section_ids[idx[0]]
 
@@ -96,7 +100,7 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
 
 
     # ------------------------------------------------------------
-    # PHASE 2 — Forward Model Check (Quantile Prediction)
+    # PHASE 2 — Forward Model Check
     # ------------------------------------------------------------
 
     all_wu_p50 = []
@@ -138,7 +142,9 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
             """)
         return
 
+
     st.subheader("🧠 Phase 2 — Forward Predictions for Candidate Sections")
+
 
     # ------------------------------------------------------------
     # PHASE 3 — Evaluate Retrieved Sections
@@ -150,10 +156,13 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
     for sec in top_sections:
 
         row = section_lookup[section_lookup.SectionID == sec].iloc[0]
-        H = int(row.H); bf = int(row.bf); tw = float(row.tw); tf = float(row.tf)
+
+        H = int(row.H); bf = int(row.bf)
+        tw = float(row.tw); tf = float(row.tf)
 
         # Forward predictions
         Xtest = np.array([[H, bf, tw, tf, L, h0, s, s0, se, fy]])
+
         Pred_wu = fwd_p50.predict(Xtest)[0]
         LB_wu   = fwd_p10.predict(Xtest)[0]
         UB_wu   = fwd_p90.predict(Xtest)[0]
@@ -163,7 +172,7 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
 
         error_ratio = abs(Pred_wu - wu_target) / wu_target
 
-        # Select correct geometry row from df_full
+        # Nearest geometry candidate
         candidates = df_full[df_full.SectionID == sec].copy()
         if len(candidates) == 0:
             continue
@@ -179,7 +188,6 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
 
         app = candidates.sort_values("geom_dist").iloc[0]
 
-        # Clean binary
         def to_binary(x):
             if isinstance(x, str):
                 v = x.strip().lower()
@@ -222,7 +230,12 @@ def run_inverse(wu_target, L, h0, s, s0, se, fy,
             "AbsErr": abs(Pred_wu - wu_target)
         })
 
+    if len(results) == 0:
+        st.error("❌ No matching sections found. Check geometric inputs.")
+        return
+
     df_res = pd.DataFrame(results).sort_values("Score").reset_index(drop=True)
+
 
     # ------------------------------------------------------------
     # FINAL OUTPUTS
